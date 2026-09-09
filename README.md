@@ -110,6 +110,18 @@ Em `Configurações > Agentes IA`, configure nome, prompt do sistema, saudação
 
 Se `OPENAI_API_KEY` não estiver configurada, o sistema usa um fallback heurístico simples (regex) para não travar o atendimento — mas a qualidade da conversa cai bastante. Configure a chave da OpenAI antes de ir para produção.
 
+### Modelo local (Ollama, LM Studio, etc.)
+
+Os agentes usam o formato `/v1/chat/completions` (padrão OpenAI), então dá para apontar para qualquer runner local compatível:
+
+```env
+OPENAI_BASE_URL=http://127.0.0.1:11434/v1
+OPENAI_MODEL=qwen2.5:3b-instruct
+OPENAI_API_KEY=ollama
+```
+
+Quando `OPENAI_BASE_URL` está definida, ela tem prioridade sobre a API da OpenAI. Modelos pequenos (3B) em CPU respondem em alguns segundos; o `lead-agent` pede JSON estruturado e, se o modelo local errar o schema, cai no fallback heurístico automaticamente.
+
 ## CRM Interno
 
 Etapas usadas no produto: Novo, Em atendimento IA, Interessado, Qualificando, Qualificado, Enviado a equipe, Em atendimento com a equipe, Sem resposta, Perdido, Ganho.

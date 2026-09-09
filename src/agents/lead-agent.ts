@@ -1,4 +1,4 @@
-import { getResponseText, type OpenAIResponsesPayload } from "@/lib/openai/responses";
+import { chatCompletion, hasLlmConfigured, type ChatMessage } from "@/lib/openai/chat";
 
 export type LeadQualification = {
   name: string | null;
@@ -48,126 +48,134 @@ type LeadAgentInput = {
 };
 
 export async function runLeadAgent(input: LeadAgentInput): Promise<LeadQualification> {
-  if (!process.env.OPENAI_API_KEY) {
+  if (!hasLlmConfigured()) {
     return heuristicQualification(input);
   }
 
   try {
-    const response = await fetch("https://api.openai.com/v1/responses", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({
-        model: input.agent?.openai_model || process.env.OPENAI_MODEL || "gpt-5-mini",
-        input: [
-          {
-            role: "system",
-            content: [
-              input.agent?.system_prompt ||
-                "Voce e um consultor da DAR+ Servicos e Formacao. Responda curto, qualifique o lead e devolva JSON valido.",
-              "",
-              "Regras de cadencia para a resposta em reply:",
-              input.agent?.greeting_template
-                ? `Saudacao preferida para resposta curta: ${input.agent.greeting_template}`
-                : "",
-              "- Se a ultima mensagem do lead for apenas uma saudacao curta, como 'oi', 'ola', 'bom dia' ou similar, use a saudacao preferida, sem ponto de exclamacao inicial e sem empilhar perguntas.",
-              "- Lembre que o lead respondeu a um disparo; nao responda como inbound generico.",
-              "- Evite 'Oi!' e pontuacao empolgada no inicio. Prefira 'Olá,' ou a saudacao configurada.",
-              "- Nao empilhe perguntas de qualificacao na primeira resposta curta.",
-              "- Avance a qualificacao em passos pequenos, uma pergunta por mensagem sempre que possivel.",
-              input.agent?.humanization_rules
-                ? `Humanizacao configurada:\n${input.agent.humanization_rules}`
-                : "",
-              input.agent?.forbidden_phrases
-                ? `Frases proibidas:\n${input.agent.forbidden_phrases}`
-                : "",
-              input.agent?.conversation_examples
-                ? `Exemplos bons:\n${input.agent.conversation_examples}`
-                : "",
-              input.agent?.agent_skills ? `Skills do agente:\n${input.agent.agent_skills}` : "",
-              "- Mesmo devolvendo JSON, o campo reply deve soar como WhatsApp humano e natural."
-            ]
-              .filter(Boolean)
-              .join("\n")
-          },
-          {
-            role: "user",
-            content: JSON.stringify({
-              agent: input.agent,
-              qualificationCriteria: input.agent?.qualification_criteria,
-              handoffInstructions: input.agent?.handoff_instructions,
-              instruction: input.campaign?.agent_prompt,
-              service: input.campaign?.property_description,
-              contact: input.contact,
-              messages: input.messages
-            })
-          }
-        ],
-        text: {
-          format: {
-            type: "json_schema",
-            name: "lead_qualification",
-            schema: {
-              type: "object",
-              additionalProperties: false,
-              required: [
-                "name",
-                "phone",
-                "interest",
-                "region",
-                "budget",
-                "paymentMethod",
-                "urgency",
-                "intention",
-                "qualificationStatus",
-                "stage",
-                "score",
-                "summary",
-                "qualified",
-                "wantsVisit",
-                "visitDatePreference",
-                "reply"
-              ],
-              properties: {
-                name: { type: ["string", "null"] },
-                phone: { type: "string" },
-                interest: { type: ["string", "null"] },
-                region: { type: ["string", "null"] },
-                budget: { type: ["number", "null"] },
-                paymentMethod: { type: ["string", "null"] },
-                urgency: { type: ["string", "null"] },
-                intention: {
-                  type: "string",
-                  enum: ["novo_servico", "contrato_recorrente", "formacao", "indefinido"]
-                },
-                qualificationStatus: { type: "string" },
-                stage: { type: "string" },
-                score: { type: "integer", minimum: 0, maximum: 100 },
-                summary: { type: "string" },
-                qualified: { type: "boolean" },
-                wantsVisit: { type: "boolean" },
-                visitDatePreference: { type: ["string", "null"] },
-                reply: { type: "string" }
-              }
+    const systemPrompt = [
+      input.agent?.system_prompt ||
+        "Voce e um consultor da DAR+ Servicos e Formacao. Responda curto, qualifique o lead e devolva JSON valido.",
+      "",
+      "Regras de cadencia para a resposta em reply:",
+      input.agent?.greeting_template
+        ? `Saudacao preferida para resposta curta: ${input.agent.greeting_template}`
+        : "",
+      "- Se a ultima mensagem do lead for apenas uma saudacao curta, como 'oi', 'ola', 'bom dia' ou similar, use a saudacao preferida, sem ponto de exclamacao inicial e sem empilhar perguntas.",
+      "- Lembre que o lead respondeu a um disparo; nao responda como inbound generico.",
+      "- Evite 'Oi!' e pontuacao empolgada no inicio. Prefira 'Olá,' ou a saudacao configurada.",
+      "- Nao empilhe perguntas de qualificacao na primeira resposta curta.",
+      "- Avance a qualificacao em passos pequenos, uma pergunta por mensagem sempre que possivel.",
+      input.agent?.humanization_rules
+        ? `Humanizacao configurada:\n${input.agent.humanization_rules}`
+        : "",
+      input.agent?.forbidden_phrases
+        ? `Frases proibidas:\n${input.agent.forbidden_phrases}`
+        : "",
+      input.agent?.conversation_examples
+        ? `Exemplos bons:\n${input.agent.conversation_examples}`
+        : "",
+      input.agent?.agent_skills ? `Skills do agente:\n${input.agent.agent_skills}` : "",
+      "- Mesmo devolvendo JSON, o campo reply deve soar como WhatsApp humano e natural.",
+      "",
+      "Responda SOMENTE com um objeto JSON valido, sem texto antes ou depois, sem blocos de codigo.",
+      "Campos obrigatorios: name, phone, interest, region, budget, paymentMethod, urgency,",
+      "intention (um de: novo_servico | contrato_recorrente | formacao | indefinido),",
+      "qualificationStatus, stage, score (0-100), summary, qualified (bool), wantsVisit (bool),",
+      "visitDatePreference, reply."
+    ]
+      .filter(Boolean)
+      .join("\n");
+
+    const messages: ChatMessage[] = [
+      { role: "system", content: systemPrompt },
+      {
+        role: "user",
+        content: JSON.stringify({
+          agent: input.agent,
+          qualificationCriteria: input.agent?.qualification_criteria,
+          handoffInstructions: input.agent?.handoff_instructions,
+          instruction: input.campaign?.agent_prompt,
+          service: input.campaign?.property_description,
+          contact: input.contact,
+          messages: input.messages
+        })
+      }
+    ];
+
+    const result = await chatCompletion({
+      model: input.agent?.openai_model || process.env.OPENAI_MODEL || "gpt-5-mini",
+      messages,
+      responseFormat: {
+        type: "json_schema",
+        json_schema: {
+          name: "lead_qualification",
+          strict: true,
+          schema: {
+            type: "object",
+            additionalProperties: false,
+            required: [
+              "name",
+              "phone",
+              "interest",
+              "region",
+              "budget",
+              "paymentMethod",
+              "urgency",
+              "intention",
+              "qualificationStatus",
+              "stage",
+              "score",
+              "summary",
+              "qualified",
+              "wantsVisit",
+              "visitDatePreference",
+              "reply"
+            ],
+            properties: {
+              name: { type: ["string", "null"] },
+              phone: { type: "string" },
+              interest: { type: ["string", "null"] },
+              region: { type: ["string", "null"] },
+              budget: { type: ["number", "null"] },
+              paymentMethod: { type: ["string", "null"] },
+              urgency: { type: ["string", "null"] },
+              intention: {
+                type: "string",
+                enum: ["novo_servico", "contrato_recorrente", "formacao", "indefinido"]
+              },
+              qualificationStatus: { type: "string" },
+              stage: { type: "string" },
+              score: { type: "integer", minimum: 0, maximum: 100 },
+              summary: { type: "string" },
+              qualified: { type: "boolean" },
+              wantsVisit: { type: "boolean" },
+              visitDatePreference: { type: ["string", "null"] },
+              reply: { type: "string" }
             }
           }
         }
-      })
+      }
     });
 
-    const payload = (await response.json()) as OpenAIResponsesPayload;
-    const outputText = getResponseText(payload);
-
-    if (!response.ok || !outputText) {
-      throw new Error(payload.error?.message || "OpenAI response failed.");
+    if (!result.ok || !result.content) {
+      throw new Error(result.error || "Modelo nao retornou resposta.");
     }
 
-    return normalizeQualification(JSON.parse(outputText), input);
+    return normalizeQualification(JSON.parse(extractJson(result.content)), input);
   } catch {
     return heuristicQualification(input);
   }
+}
+
+/** Modelos locais as vezes embrulham o JSON em ```json ... ``` ou texto. Extrai o objeto. */
+function extractJson(raw: string): string {
+  const fenced = raw.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  const candidate = (fenced?.[1] ?? raw).trim();
+  const start = candidate.indexOf("{");
+  const end = candidate.lastIndexOf("}");
+
+  return start !== -1 && end !== -1 ? candidate.slice(start, end + 1) : candidate;
 }
 
 function heuristicQualification(input: LeadAgentInput): LeadQualification {
