@@ -39,8 +39,8 @@ export default async function DashboardPage() {
           title="Dashboard"
           description="Acompanhe importacoes, disparos, respostas e qualificacao dos leads em tempo real."
         />
-        <section className="rounded-lg border bg-card p-6 shadow-sm">
-          <h2 className="text-base font-semibold text-slate-950">Perfil nao configurado</h2>
+        <section className="rounded-xl border bg-card p-6 shadow-sm">
+          <h2 className="font-display text-lg text-slate-950">Perfil nao configurado</h2>
           <p className="mt-3 text-sm leading-6 text-muted-foreground">{error}</p>
         </section>
       </>
@@ -150,9 +150,9 @@ export default async function DashboardPage() {
           <StatCard key={stat.label} {...stat} />
         ))}
       </section>
-      <section className="mt-8 grid gap-6 lg:grid-cols-2">
-        <div className="rounded-lg border bg-card p-6 shadow-sm">
-          <h2 className="text-base font-semibold text-slate-950">Meta WhatsApp</h2>
+      <section className="mt-10 grid gap-6 lg:grid-cols-2">
+        <div className="rounded-xl border bg-card p-6 shadow-sm">
+          <h2 className="font-display text-lg text-slate-950">Meta WhatsApp</h2>
           <div className="mt-4 space-y-2 text-sm text-muted-foreground">
             {metaPhone.data ? (
               <>
@@ -171,8 +171,8 @@ export default async function DashboardPage() {
             </p>
           </div>
         </div>
-        <div className="rounded-lg border bg-card p-6 shadow-sm">
-          <h2 className="text-base font-semibold text-slate-950">Operacao</h2>
+        <div className="rounded-xl border bg-card p-6 shadow-sm">
+          <h2 className="font-display text-lg text-slate-950">Operacao</h2>
           <div className="mt-4 grid gap-3 text-sm text-muted-foreground">
             <HealthRow label="Fila de disparos" ok={pendingJobs < 100} value={`${pendingJobs} pendente(s)`} />
             <HealthRow label="Agentes IA" ok={activeAgents > 0} value={`${activeAgents} ativo(s)`} />
@@ -206,7 +206,7 @@ async function countRows(
 
 function HealthRow({ label, ok, value }: { label: string; ok: boolean; value: string }) {
   return (
-    <div className="flex items-center justify-between gap-3 rounded-md border bg-slate-50 px-3 py-2">
+    <div className="flex items-center justify-between gap-3 rounded-lg border bg-slate-50 px-3 py-2">
       <span>{label}</span>
       <span className={ok ? "font-medium text-emerald-700" : "font-medium text-amber-700"}>
         {value}

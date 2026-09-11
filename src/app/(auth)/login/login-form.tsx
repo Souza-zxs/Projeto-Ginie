@@ -20,7 +20,7 @@ export function LoginForm({ redirectTo }: { redirectTo?: string }) {
           type="email"
           autoComplete="email"
           required
-          className="h-11 w-full rounded-md border bg-white px-3 text-sm outline-none transition focus:border-teal-600 focus:ring-4 focus:ring-teal-600/10"
+          className="h-11 w-full rounded-lg border bg-white px-3 text-sm outline-none transition focus:border-primary focus:ring-4 focus:ring-primary/10"
         />
       </div>
       <div className="space-y-2">
@@ -33,18 +33,18 @@ export function LoginForm({ redirectTo }: { redirectTo?: string }) {
           type="password"
           autoComplete="current-password"
           required
-          className="h-11 w-full rounded-md border bg-white px-3 text-sm outline-none transition focus:border-teal-600 focus:ring-4 focus:ring-teal-600/10"
+          className="h-11 w-full rounded-lg border bg-white px-3 text-sm outline-none transition focus:border-primary focus:ring-4 focus:ring-primary/10"
         />
       </div>
       {state?.error ? (
-        <p className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+        <p className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
           {state.error}
         </p>
       ) : null}
       <button
         type="submit"
         disabled={pending}
-        className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-md bg-primary px-4 text-sm font-semibold text-primary-foreground transition hover:bg-teal-800 disabled:cursor-not-allowed disabled:opacity-70"
+        className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-lg bg-primary px-4 text-sm font-semibold text-primary-foreground transition hover:brightness-95 disabled:cursor-not-allowed disabled:opacity-70"
       >
         <LogIn className="h-4 w-4" />
         {pending ? "Entrando..." : "Entrar"}
