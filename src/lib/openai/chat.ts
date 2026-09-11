@@ -29,6 +29,21 @@ export function hasLlmConfigured() {
   return Boolean(process.env.OPENAI_API_KEY || process.env.OPENAI_BASE_URL);
 }
 
+/**
+ * Decide qual modelo usar. Cada agente guarda um `openai_model` (ex.: "gpt-5-mini"),
+ * mas esse nome não existe em runners locais. Em modo local (OPENAI_BASE_URL setada),
+ * o modelo do ambiente (OPENAI_MODEL) sempre vence, ignorando o que está salvo no agente.
+ */
+export function resolveModel(agentModel?: string | null) {
+  const { isLocal } = getOpenAIConfig();
+
+  if (isLocal) {
+    return process.env.OPENAI_MODEL || agentModel || "llama3.2:3b";
+  }
+
+  return agentModel || process.env.OPENAI_MODEL || "gpt-4.1-mini";
+}
+
 type ChatCompletionParams = {
   model: string;
   messages: ChatMessage[];

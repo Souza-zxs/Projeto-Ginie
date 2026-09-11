@@ -1,4 +1,4 @@
-import { chatCompletion, hasLlmConfigured, type ChatMessage } from "@/lib/openai/chat";
+import { chatCompletion, hasLlmConfigured, resolveModel, type ChatMessage } from "@/lib/openai/chat";
 
 type ChatAgentInput = {
   agent: {
@@ -64,7 +64,7 @@ export async function runAgentChat(input: ChatAgentInput) {
   ];
 
   const result = await chatCompletion({
-    model: input.agent.openai_model || process.env.OPENAI_MODEL || "gpt-4.1-mini",
+    model: resolveModel(input.agent.openai_model),
     messages
   });
 

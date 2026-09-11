@@ -1,4 +1,4 @@
-import { chatCompletion, hasLlmConfigured, type ChatMessage } from "@/lib/openai/chat";
+import { chatCompletion, hasLlmConfigured, resolveModel, type ChatMessage } from "@/lib/openai/chat";
 
 export type LeadQualification = {
   name: string | null;
@@ -104,7 +104,7 @@ export async function runLeadAgent(input: LeadAgentInput): Promise<LeadQualifica
     ];
 
     const result = await chatCompletion({
-      model: input.agent?.openai_model || process.env.OPENAI_MODEL || "gpt-5-mini",
+      model: resolveModel(input.agent?.openai_model),
       messages,
       responseFormat: {
         type: "json_schema",
