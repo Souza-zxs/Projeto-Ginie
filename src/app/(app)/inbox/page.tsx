@@ -19,6 +19,7 @@ import { PageHeader } from "@/components/page-header";
 import { cn } from "@/lib/utils";
 import { getCurrentProfile } from "@/lib/auth/organization";
 import { createClient } from "@/lib/supabase/server";
+import { AgentTester } from "./agent-tester";
 import {
   qualifyManuallyAction,
   sendManualReplyAction,
@@ -116,6 +117,14 @@ export default async function InboxPage({
     .limit(100)
     .returns<ConversationRow[]>();
 
+  const { data: testableAgents } = await supabase
+    .from("ai_agents")
+    .select("id, name, agent_type")
+    .eq("organization_id", profile.organization_id)
+    .eq("active", true)
+    .order("created_at", { ascending: false })
+    .returns<Array<{ id: string; name: string; agent_type: string }>>();
+
   const allConversations = conversations ?? [];
   const filteredConversations = allConversations.filter((conversation) => {
     const haystack = [
@@ -191,6 +200,10 @@ export default async function InboxPage({
         <Metric icon={<Phone className="h-4 w-4" />} label="Uazapi" value={String(uazapiCount)} />
         <Metric icon={<PanelRight className="h-4 w-4" />} label="Sem campanha" value={String(withoutCampaignCount)} />
       </section>
+
+      <div className="mb-5">
+        <AgentTester agents={testableAgents ?? []} />
+      </div>
 
       <section className="grid min-h-[740px] overflow-hidden rounded-lg border bg-card shadow-sm xl:grid-cols-[360px_minmax(0,1fr)_340px]">
         <aside className="border-r bg-white">
