@@ -118,18 +118,18 @@ export default async function DashboardPage() {
   const responseRate =
     messagesSent > 0 ? `${Math.round((inboundMessages / messagesSent) * 100)}%` : "0%";
 
-  // As 3 métricas que mais importam num relance ganham destaque (bento);
-  // o resto vira detalhamento — evita o grid de 13 caixinhas idênticas.
-  const heroStats = [
-    { label: "Leads qualificados", value: String(qualifiedLeads), icon: CheckCircle2, tone: "success" as const },
-    { label: "Taxa de resposta", value: responseRate, icon: TrendingUp },
-    { label: "Mensagens enviadas", value: String(messagesSent), icon: Send }
-  ];
-
   const stats = [
     { label: "Contatos importados", value: String(contactsImported), icon: Users },
+    { label: "Mensagens enviadas", value: String(messagesSent), icon: Send },
     { label: "Falhas", value: String(failedMessages), icon: AlertTriangle, tone: "warning" as const },
     { label: "Respostas recebidas", value: String(inboundMessages), icon: MessageCircle },
+    { label: "Taxa de resposta", value: responseRate, icon: TrendingUp },
+    {
+      label: "Leads qualificados",
+      value: String(qualifiedLeads),
+      icon: CheckCircle2,
+      tone: "success" as const
+    },
     { label: "Enviados a equipe", value: String(brokerSentLeads), icon: UserCheck },
     { label: "Equipe sem resposta", value: String(brokerNoResponse), icon: AlertTriangle },
     { label: "Leads redistribuidos", value: String(redistributedLeads), icon: RefreshCcw },
@@ -145,16 +145,7 @@ export default async function DashboardPage() {
         title="Dashboard"
         description="Acompanhe importacoes, disparos, respostas e qualificacao dos leads em tempo real."
       />
-      <section className="grid gap-4 sm:grid-cols-3">
-        {heroStats.map((stat) => (
-          <StatCard key={stat.label} {...stat} size="lg" />
-        ))}
-      </section>
-
-      <p className="mb-3 mt-8 text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
-        Detalhamento
-      </p>
-      <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
+      <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         {stats.map((stat) => (
           <StatCard key={stat.label} {...stat} />
         ))}

@@ -1,10 +1,43 @@
-import { LogOut } from "lucide-react";
+import Link from "next/link";
+import type { Route } from "next";
+import {
+  BarChart3,
+  Bot,
+  Bell,
+  Building2,
+  CalendarDays,
+  ClipboardList,
+  Inbox,
+  LayoutDashboard,
+  LogOut,
+  Megaphone,
+  Plug,
+  Settings,
+  Smartphone,
+  Users
+} from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 import { signOutAction } from "@/app/(app)/actions";
 import { contrastForegroundHslTriplet, hexToHslTriplet } from "@/lib/branding/color";
-import { SidebarNav } from "@/components/sidebar-nav";
 
 const DEFAULT_ORG_NAME = "DAR+ Serviços | Formação";
 const DEFAULT_LOGO_SRC = "/brand/logo-fill.png";
+
+const navigation: Array<{ href: Route; label: string; icon: LucideIcon }> = [
+  { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
+  { href: "/campaigns", label: "Campanhas", icon: Megaphone },
+  { href: "/inbox", label: "Inbox", icon: Inbox },
+  { href: "/crm", label: "CRM", icon: BarChart3 },
+  { href: "/appointments" as Route, label: "Agenda", icon: CalendarDays },
+  { href: "/reminders" as Route, label: "Lembretes", icon: Bell },
+  { href: "/brokers", label: "Equipe", icon: Users },
+  { href: "/settings/agents" as Route, label: "Agentes IA", icon: Bot },
+  { href: "/settings/organization" as Route, label: "Organização", icon: Building2 },
+  { href: "/settings/whatsapp" as Route, label: "WhatsApp", icon: Smartphone },
+  { href: "/settings/integrations" as Route, label: "Integrações", icon: Plug },
+  { href: "/settings/logs" as Route, label: "Logs", icon: ClipboardList },
+  { href: "/settings", label: "Configuracoes", icon: Settings }
+];
 
 export function AppShell({
   children,
@@ -36,52 +69,42 @@ export function AppShell({
 
   return (
     <div className="min-h-screen bg-background" style={brandStyle}>
-      <aside className="fixed inset-y-0 left-0 hidden w-64 flex-col bg-slate-950 lg:flex">
-        <div className="flex h-20 items-center gap-3 border-b border-slate-800/80 px-6">
-          {/* Chip claro por trás do logo: garante contraste mesmo com logos
-              escuros enviados por organizações white-label sobre o fundo escuro. */}
-          <div className="rounded-lg bg-white px-3 py-2 shadow-sm">
-            {/* eslint-disable-next-line @next/next/no-img-element -- logo vem de storage externo (Supabase), varia por organização */}
-            <img src={logoSrc} alt={displayName} className="h-6 w-auto max-w-[130px] object-contain" />
-          </div>
+      <aside className="fixed inset-y-0 left-0 hidden w-64 border-r bg-white lg:block">
+        <div className="flex h-16 items-center gap-3 border-b px-6">
+          {/* eslint-disable-next-line @next/next/no-img-element -- logo vem de storage externo (Supabase), varia por organização */}
+          <img src={logoSrc} alt={displayName} className="h-9 w-auto max-w-[150px] object-contain" />
           <div className="sr-only">
             <p>{displayName}</p>
-            <p>WhatsApp, IA e CRM</p>
+            <p className="text-xs text-muted-foreground">WhatsApp, IA e CRM</p>
           </div>
         </div>
-
-        <div className="flex-1 overflow-y-auto">
-          <SidebarNav />
-        </div>
-
-        {/* Trama de pontos artesanal, mesma linguagem visual do login */}
-        <div
-          aria-hidden
-          className="h-16 opacity-[0.35]"
-          style={{
-            backgroundImage: "radial-gradient(hsl(var(--primary) / 0.6) 1px, transparent 1px)",
-            backgroundSize: "16px 16px",
-            maskImage: "linear-gradient(to top, black, transparent)"
-          }}
-        />
+        <nav className="space-y-1 p-4">
+          {navigation.map((item) => {
+            const Icon = item.icon;
+            return (
+              <Link
+                key={item.href}
+                href={item.href}
+                className="flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium text-slate-700 transition hover:bg-muted hover:text-slate-950"
+              >
+                <Icon className="h-4 w-4" />
+                {item.label}
+              </Link>
+            );
+          })}
+        </nav>
       </aside>
-
       <div className="lg:pl-64">
         <header className="sticky top-0 z-20 flex h-16 items-center justify-between border-b bg-white/90 px-6 backdrop-blur">
-          <div className="flex items-center gap-3">
-            <span className="flex h-8 w-8 items-center justify-center rounded-full bg-primary text-xs font-semibold text-primary-foreground">
-              {getInitials(userEmail)}
-            </span>
-            <div>
-              <p className="text-sm font-medium text-slate-950">{userEmail ?? "Usuario"}</p>
-              <p className="text-xs text-muted-foreground">Sessão protegida por Supabase Auth</p>
-            </div>
+          <div>
+            <p className="text-sm font-medium text-slate-950">{userEmail ?? "Usuario"}</p>
+            <p className="text-xs text-muted-foreground">Sessao protegida por Supabase Auth</p>
           </div>
           {showSignOut ? (
             <form action={signOutAction}>
               <button
                 type="submit"
-                className="inline-flex h-9 items-center gap-2 rounded-lg border bg-white px-3 text-sm font-medium text-slate-700 transition hover:bg-muted"
+                className="inline-flex h-9 items-center gap-2 rounded-md border bg-white px-3 text-sm font-medium text-slate-700 transition hover:bg-muted"
               >
                 <LogOut className="h-4 w-4" />
                 Sair
@@ -93,19 +116,4 @@ export function AppShell({
       </div>
     </div>
   );
-}
-
-function getInitials(email?: string | null) {
-  if (!email) {
-    return "U";
-  }
-
-  const name = email.split("@")[0] ?? email;
-  const parts = name.split(/[.\-_]/).filter(Boolean);
-
-  if (parts.length >= 2) {
-    return `${parts[0][0]}${parts[1][0]}`.toUpperCase();
-  }
-
-  return name.slice(0, 2).toUpperCase();
 }
