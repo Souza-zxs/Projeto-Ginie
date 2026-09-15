@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { getCurrentProfile } from "@/lib/auth/organization";
-import { normalizeBrazilianPhone } from "@/lib/phone";
+import { normalizePhone } from "@/lib/phone";
 import { syncHauzappBrokers } from "@/services/hauzapp/workflow";
 import { createClient } from "@/lib/supabase/server";
 
@@ -26,7 +26,7 @@ export async function createBrokerAction(formData: FormData) {
     return;
   }
 
-  const phone = normalizeBrazilianPhone(parsed.data.phone);
+  const phone = normalizePhone(parsed.data.phone);
 
   if (!phone) {
     return;

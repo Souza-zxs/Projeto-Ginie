@@ -1,6 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { runLeadAgent } from "@/agents/lead-agent";
-import { normalizeBrazilianPhone } from "@/lib/phone";
+import { normalizePhone } from "@/lib/phone";
 import {
   configString,
   getActiveIntegrationConfig,
@@ -43,7 +43,7 @@ export async function processUazapiLeadMessage({
   instanceId,
   hauzappClienteId
 }: LeadMessageInput) {
-  const normalizedPhone = normalizeBrazilianPhone(phone) ?? phone.replace(/\D/g, "");
+  const normalizedPhone = normalizePhone(phone) ?? phone.replace(/\D/g, "");
   const { contact, conversation } = await findOrCreateUazapiConversation({
     supabase,
     organizationId,

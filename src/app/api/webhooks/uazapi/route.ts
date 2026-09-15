@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { normalizeBrazilianPhone } from "@/lib/phone";
+import { normalizePhone } from "@/lib/phone";
 import { scheduleBrokerProgressChecks } from "@/services/broker-sla/workflow";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { processUazapiLeadMessage } from "@/services/uazapi/lead-workflow";
@@ -47,7 +47,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ processed: false, reason: "ignored_own_or_group_message" });
   }
 
-  const phone = normalizeBrazilianPhone(
+  const phone = normalizePhone(
     messageData?.sender?.split("@")[0] || messageData?.chatid?.split("@")[0] || payload.phone || payload.from
   );
   const text = messageData?.text || payload.text || payload.message || "";

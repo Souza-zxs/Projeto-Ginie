@@ -1,5 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { normalizeBrazilianPhone } from "@/lib/phone";
+import { normalizePhone } from "@/lib/phone";
 import { getAllNegociacoes, type HauzappNegotiation } from "@/services/hauzapp/client";
 import {
   configBoolean,
@@ -39,7 +39,7 @@ export async function syncHauzappProspectionLeads({
 
   for (const negotiation of negotiations.filter((item) => isProspectionStage(item, prospectionStageId))) {
     try {
-      const phone = normalizeBrazilianPhone(negotiation.clienteTelefone);
+      const phone = normalizePhone(negotiation.clienteTelefone);
 
       if (!phone) {
         result.skipped += 1;

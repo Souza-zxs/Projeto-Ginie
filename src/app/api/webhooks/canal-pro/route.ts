@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { normalizeBrazilianPhone } from "@/lib/phone";
+import { normalizePhone } from "@/lib/phone";
 import { createAdminClient } from "@/lib/supabase/admin";
 
 type CanalProPayload = {
@@ -14,7 +14,7 @@ type CanalProPayload = {
 
 export async function POST(request: Request) {
   const payload = (await request.json().catch(() => ({}))) as CanalProPayload;
-  const phone = normalizeBrazilianPhone(payload.phone);
+  const phone = normalizePhone(payload.phone);
 
   if (!payload.organization_id || !phone) {
     return NextResponse.json(

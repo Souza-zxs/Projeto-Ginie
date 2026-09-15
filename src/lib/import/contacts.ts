@@ -1,6 +1,6 @@
 import ExcelJS from "exceljs";
 import { parse } from "csv-parse/sync";
-import { normalizeBrazilianPhone } from "@/lib/phone";
+import { normalizePhone } from "@/lib/phone";
 
 export type ImportedContact = {
   name: string | null;
@@ -119,7 +119,7 @@ function normalizeRows(rows: Row[]) {
   for (const row of rows) {
     const name = pickField(row, nameFields);
     const phoneValue = pickField(row, phoneFields) ?? findPhoneLikeValue(row);
-    const phone = normalizeBrazilianPhone(phoneValue);
+    const phone = normalizePhone(phoneValue);
 
     if (!phone) {
       invalidRows += 1;
