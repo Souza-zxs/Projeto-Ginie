@@ -4,7 +4,25 @@ import { scheduleBrokerProgressChecks } from "@/services/broker-sla/workflow";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { processUazapiLeadMessage } from "@/services/uazapi/lead-workflow";
 
-type UazapiPayload = {
+type UazapiMessageData = {
+  sender?: string;
+  chatid?: string;
+  text?: string;
+  fromMe?: boolean;
+  isGroup?: boolean;
+  wasSentByApi?: boolean;
+  hauzapp_cliente_id?: string;
+  clienteID?: string;
+  clienteId?: string;
+};
+
+type UazapiWebhookEnvelope = {
+  event?: string;
+  instance?: string;
+  data?: UazapiMessageData | UazapiMessageData[];
+};
+
+type UazapiPayload = UazapiWebhookEnvelope & {
   phone?: string;
   from?: string;
   text?: string;
@@ -15,9 +33,24 @@ type UazapiPayload = {
 };
 
 export async function POST(request: Request) {
+  const webhookSecret = process.env.UAZAPI_WEBHOOK_SECRET;
+  const providedSecret = new URL(request.url).searchParams.get("token");
+
+  if (webhookSecret && providedSecret !== webhookSecret) {
+    return NextResponse.json({ error: "Invalid webhook token." }, { status: 401 });
+  }
+
   const payload = (await request.json().catch(() => ({}))) as UazapiPayload;
-  const phone = normalizeBrazilianPhone(payload.phone || payload.from);
-  const text = payload.text || payload.message || "";
+  const messageData = extractUazapiMessage(payload);
+
+  if (messageData && (messageData.fromMe || messageData.isGroup)) {
+    return NextResponse.json({ processed: false, reason: "ignored_own_or_group_message" });
+  }
+
+  const phone = normalizeBrazilianPhone(
+    messageData?.sender?.split("@")[0] || messageData?.chatid?.split("@")[0] || payload.phone || payload.from
+  );
+  const text = messageData?.text || payload.text || payload.message || "";
 
   if (!phone) {
     return NextResponse.json({ error: "Telefone nao identificado." }, { status: 400 });
@@ -180,8 +213,28 @@ async function resolveLeadOrganization(
   return integration?.organization_id ?? null;
 }
 
+function extractUazapiMessage(payload: UazapiPayload): UazapiMessageData | null {
+  const data = payload.data;
+
+  if (!data) {
+    return null;
+  }
+
+  return Array.isArray(data) ? data[0] ?? null : data;
+}
+
 function getHauzappClienteId(payload: UazapiPayload) {
-  return payload.hauzapp_cliente_id || payload.clienteID || payload.clienteId || null;
+  const messageData = extractUazapiMessage(payload);
+
+  return (
+    messageData?.hauzapp_cliente_id ||
+    messageData?.clienteID ||
+    messageData?.clienteId ||
+    payload.hauzapp_cliente_id ||
+    payload.clienteID ||
+    payload.clienteId ||
+    null
+  );
 }
 
 async function processAdminMessage({

@@ -218,11 +218,13 @@ export default async function WhatsappSettingsPage() {
               <Field name="sendOrder" label="Ordem no rodizio" placeholder="0" type="number" defaultValue="0" />
             </div>
             <div className="rounded-md border bg-slate-50 p-3 text-sm text-muted-foreground">
-              Configure na Uazapi o webhook abaixo para mensagens recebidas. Campos esperados:
-              <span className="mt-2 block rounded bg-white px-2 py-1 font-mono text-xs text-slate-700">
-                https://seu-app.vercel.app/api/webhooks/uazapi
+              Configure na Uazapi o webhook abaixo para mensagens recebidas (evento <b>messages</b>, excluindo <b>wasSentByApi</b>):
+              <span className="mt-2 block rounded bg-white px-2 py-1 font-mono text-xs text-slate-700 break-all">
+                https://seu-app.vercel.app/api/webhooks/uazapi?token=SEU_UAZAPI_WEBHOOK_SECRET
               </span>
-              <span className="mt-2 block">Envie telefone/remetente em <b>phone</b> ou <b>from</b> e texto em <b>message</b>, <b>text</b> ou <b>body</b>.</span>
+              <span className="mt-2 block">
+                O <b>?token=</b> precisa ser igual ao valor de <code>UAZAPI_WEBHOOK_SECRET</code> nas variaveis de ambiente — sem isso, qualquer pessoa que descobrir a URL poderia enviar eventos falsos para essa rota.
+              </span>
             </div>
             <label className="flex items-center gap-3 rounded-md border bg-white px-3 py-3 text-sm">
               <input name="active" type="checkbox" defaultChecked className="h-4 w-4" />

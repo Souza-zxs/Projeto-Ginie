@@ -20,22 +20,22 @@ export async function sendUazapiMessage({
     throw new Error("Uazapi credentials are missing.");
   }
 
-  const response = await fetch(`${baseUrl.replace(/\/$/, "")}/send-message`, {
+  const response = await fetch(`${baseUrl.replace(/\/$/, "")}/send/text`, {
     method: "POST",
     headers: {
-      Authorization: `Bearer ${token}`,
+      token,
       "Content-Type": "application/json"
     },
     body: JSON.stringify({
-      phone,
-      message: text
+      number: phone,
+      text
     })
   });
 
-  const payload = (await response.json().catch(() => ({}))) as { message?: string };
+  const payload = (await response.json().catch(() => ({}))) as { error?: string; message?: string };
 
   if (!response.ok) {
-    throw new Error(payload.message || "Uazapi request failed.");
+    throw new Error(payload.error || payload.message || "Uazapi request failed.");
   }
 
   return payload;
