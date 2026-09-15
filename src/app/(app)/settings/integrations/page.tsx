@@ -5,9 +5,11 @@ import { PageHeader } from "@/components/page-header";
 import { getCurrentProfile } from "@/lib/auth/organization";
 import { createClient } from "@/lib/supabase/server";
 import {
+  deleteUazapiIntegrationAction,
   enqueueHauzappProspectionSyncAction,
   saveHauzappIntegrationAction,
-  saveUazapiIntegrationAction
+  saveUazapiIntegrationAction,
+  toggleUazapiIntegrationAction
 } from "./actions";
 
 type IntegrationRow = {
@@ -47,8 +49,9 @@ export default async function IntegrationsPage() {
       ])
     : [{ data: [] }, { data: [] }];
   const hauzapp = getLatestIntegration(integrations ?? [], "hauzapp");
-  const uazapi = getLatestIntegration(integrations ?? [], "uazapi");
+  const uazapiConnections = (integrations ?? []).filter((integration) => integration.provider === "uazapi");
   const leadAgents = (agents ?? []).filter((agent) => agent.agent_type === "lead_meta");
+  const agentNameById = new Map((agents ?? []).map((agent) => [agent.id, agent.name]));
 
   return (
     <>
@@ -69,6 +72,7 @@ export default async function IntegrationsPage() {
             name="apiKey"
             label="Chave de integração HauzApp"
             type="password"
+            required={false}
             placeholder={hauzapp?.config?.apiKey ? "Chave salva. Preencha apenas para trocar." : "Cole a chave HauzApp"}
           />
 
@@ -91,44 +95,109 @@ export default async function IntegrationsPage() {
           </button>
         </form>
 
-        <form action={saveUazapiIntegrationAction} className="space-y-5 rounded-lg border bg-card p-6 shadow-sm">
+        <div className="space-y-5 rounded-lg border bg-card p-6 shadow-sm">
           <IntegrationTitle
             title="Uazapi WhatsApp"
-            description="Atende leads vindos do HauzApp e cobra equipe/admin pelo WhatsApp."
-            active={Boolean(uazapi?.active)}
+            description="Cada número é uma conexão separada — dá pra ter várias linhas independentes, cada uma com seu agente."
+            active={uazapiConnections.some((connection) => connection.active)}
           />
 
-          <Field
-            name="baseUrl"
-            label="URL da Uazapi"
-            placeholder="https://sua-uazapi.com"
-            defaultValue={configString(uazapi?.config, "baseUrl")}
-          />
-          <Field
-            name="token"
-            label="Token da Uazapi"
-            type="password"
-            placeholder={uazapi?.config?.token ? "Token salvo. Preencha apenas para trocar." : "Cole o token da Uazapi"}
-          />
-
-          <AgentSelect
-            agents={leadAgents}
-            name="leadAgentId"
-            label="Agente que responde pela Uazapi"
-            selected={configString(uazapi?.config, "leadAgentId")}
-          />
+          {uazapiConnections.length ? (
+            <div className="overflow-hidden rounded-md border">
+              <table className="w-full text-left text-sm">
+                <thead className="bg-muted text-xs uppercase text-muted-foreground">
+                  <tr>
+                    <th className="px-3 py-2">Nome</th>
+                    <th className="px-3 py-2">Instance ID</th>
+                    <th className="px-3 py-2">Agente</th>
+                    <th className="px-3 py-2">Status</th>
+                    <th className="px-3 py-2"></th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y">
+                  {uazapiConnections.map((connection) => {
+                    const agentId = configString(connection.config, "leadAgentId");
+                    return (
+                      <tr key={connection.id}>
+                        <td className="px-3 py-2 font-medium text-slate-950">{connection.name}</td>
+                        <td className="px-3 py-2 font-mono text-xs text-slate-700">
+                          {configString(connection.config, "instanceId") || "não definido"}
+                        </td>
+                        <td className="px-3 py-2 text-slate-700">
+                          {agentId ? agentNameById.get(agentId) ?? "Agente removido" : "Mais recente ativo"}
+                        </td>
+                        <td className="px-3 py-2">
+                          <Badge tone={connection.active ? "success" : "muted"}>
+                            {connection.active ? "Ativa" : "Pausada"}
+                          </Badge>
+                        </td>
+                        <td className="px-3 py-2">
+                          <div className="flex justify-end gap-2">
+                            <form action={toggleUazapiIntegrationAction}>
+                              <input type="hidden" name="id" value={connection.id} />
+                              <input type="hidden" name="active" value={String(connection.active)} />
+                              <button className="rounded-md border px-2 py-1 text-xs font-semibold">
+                                {connection.active ? "Pausar" : "Ativar"}
+                              </button>
+                            </form>
+                            <form action={deleteUazapiIntegrationAction}>
+                              <input type="hidden" name="id" value={connection.id} />
+                              <button className="rounded-md border border-red-200 bg-red-50 px-2 py-1 text-xs font-semibold text-red-700">
+                                Excluir
+                              </button>
+                            </form>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <p className="rounded-md border bg-slate-50 p-3 text-sm text-muted-foreground">
+              Nenhuma conexão Uazapi cadastrada ainda.
+            </p>
+          )}
 
           <div className="rounded-md border bg-muted/40 p-3 text-sm text-muted-foreground">
-            Webhook para configurar na Uazapi:
-            <div className="mt-2 rounded-md bg-white px-3 py-2 font-mono text-xs text-slate-700">
-              https://seu-app.vercel.app/api/webhooks/uazapi
+            Webhook para configurar em <b>cada</b> instância na Uazapi (o mesmo endereço serve para todas):
+            <div className="mt-2 break-all rounded-md bg-white px-3 py-2 font-mono text-xs text-slate-700">
+              http://179.199.135.212:8080/api/webhooks/uazapi?token=SEU_UAZAPI_WEBHOOK_SECRET
             </div>
+            <p className="mt-2">
+              Depois de conectar, manda uma mensagem de teste pro número e confere em{" "}
+              <Link href={"/settings/logs" as Route} className="font-semibold text-primary">
+                Configurações &gt; Logs
+              </Link>{" "}
+              o valor de <b>instance</b> que chegou — cola ele no campo &quot;Instance ID&quot; abaixo pra essa
+              conexão específica responder pelo número certo.
+            </p>
           </div>
 
-          <button className="h-10 w-full rounded-md bg-primary text-sm font-semibold text-primary-foreground">
-            Salvar Uazapi
-          </button>
-        </form>
+          <form action={saveUazapiIntegrationAction} className="space-y-4 border-t pt-5">
+            <p className="text-sm font-semibold text-slate-950">Nova conexão (ou atualizar por nome)</p>
+            <Field name="name" label="Nome interno" placeholder="Uazapi - Vendas" />
+            <Field
+              name="instanceId"
+              label="Instance ID"
+              placeholder="Cole depois do primeiro teste (opcional agora)"
+              required={false}
+            />
+            <Field name="baseUrl" label="URL da Uazapi" placeholder="https://sua-uazapi.com" />
+            <Field
+              name="token"
+              label="Token da instância"
+              type="password"
+              required={false}
+              placeholder="Cole o token dessa instância (obrigatório na primeira vez)"
+            />
+            <AgentSelect agents={leadAgents} name="leadAgentId" label="Agente que responde por essa linha" />
+            <button className="h-10 w-full rounded-md bg-primary text-sm font-semibold text-primary-foreground">
+              Salvar conexão
+            </button>
+          </form>
+        </div>
       </section>
 
       <section className="mt-6 rounded-lg border bg-card p-5 shadow-sm">
@@ -200,13 +269,15 @@ function Field({
   label,
   type = "text",
   placeholder,
-  defaultValue
+  defaultValue,
+  required = true
 }: {
   name: string;
   label: string;
   type?: string;
   placeholder?: string;
   defaultValue?: string | null;
+  required?: boolean;
 }) {
   return (
     <label className="block space-y-2">
@@ -216,6 +287,7 @@ function Field({
         type={type}
         placeholder={placeholder}
         defaultValue={defaultValue ?? undefined}
+        required={required}
         className="h-10 w-full rounded-md border bg-white px-3 text-sm"
       />
     </label>

@@ -24,6 +24,8 @@ const hauzappSchema = z.object({
 });
 
 const uazapiSchema = z.object({
+  name: z.string().min(2, "De um nome pra essa conexao (ex.: Uazapi - Vendas)."),
+  instanceId: z.string().optional(),
   baseUrl: z.string().url("Informe a URL da Uazapi."),
   token: z.string().optional(),
   leadAgentId: z.string().uuid().optional().or(z.literal(""))
@@ -97,8 +99,15 @@ export async function saveHauzappIntegrationAction(formData: FormData) {
   });
 }
 
+// Uazapi é diferente das outras integrações: uma organização pode ter várias
+// conexões ativas ao mesmo tempo (um número por linha de atendimento), cada
+// uma com seu proprio agente. Por isso não reaproveita saveNativeIntegration
+// (que sempre atualiza "a" integração ativa) — aqui cada nome é uma conexão
+// independente, alinhado com o índice único (organization_id, provider, name).
 export async function saveUazapiIntegrationAction(formData: FormData) {
   const parsed = uazapiSchema.safeParse({
+    name: formData.get("name"),
+    instanceId: formData.get("instanceId") || undefined,
     baseUrl: formData.get("baseUrl"),
     token: formData.get("token") || undefined,
     leadAgentId: formData.get("leadAgentId") || ""
@@ -108,16 +117,90 @@ export async function saveUazapiIntegrationAction(formData: FormData) {
     return;
   }
 
-  await saveNativeIntegration({
-    provider: "uazapi",
-    name: "Uazapi WhatsApp",
-    formConfig: {
-      baseUrl: parsed.data.baseUrl,
-      token: parsed.data.token,
-      leadAgentId: parsed.data.leadAgentId || null
-    },
-    secretKeys: ["token"]
-  });
+  const supabase = await createClient();
+  const { profile } = await getCurrentProfile(supabase);
+
+  if (!profile) {
+    return;
+  }
+
+  const { data: existing } = await supabase
+    .from("integrations")
+    .select("id, config")
+    .eq("organization_id", profile.organization_id)
+    .eq("provider", "uazapi")
+    .eq("name", parsed.data.name)
+    .maybeSingle<{ id: string; config: Record<string, unknown> | null }>();
+
+  const config: Record<string, unknown> = {
+    ...(existing?.config ?? {}),
+    instanceId: parsed.data.instanceId?.trim() || null,
+    baseUrl: parsed.data.baseUrl,
+    leadAgentId: parsed.data.leadAgentId || null
+  };
+
+  if (parsed.data.token?.trim()) {
+    config.token = parsed.data.token.trim();
+  }
+
+  if (existing) {
+    await supabase
+      .from("integrations")
+      .update({ config, active: true })
+      .eq("id", existing.id)
+      .eq("organization_id", profile.organization_id);
+  } else {
+    await supabase.from("integrations").insert({
+      organization_id: profile.organization_id,
+      provider: "uazapi",
+      name: parsed.data.name,
+      config,
+      active: true
+    });
+  }
+
+  revalidatePath("/settings/integrations");
+}
+
+export async function toggleUazapiIntegrationAction(formData: FormData) {
+  const id = String(formData.get("id") || "");
+  const active = String(formData.get("active") || "") === "true";
+
+  if (!id) return;
+
+  const supabase = await createClient();
+  const { profile } = await getCurrentProfile(supabase);
+
+  if (!profile) return;
+
+  await supabase
+    .from("integrations")
+    .update({ active: !active })
+    .eq("id", id)
+    .eq("organization_id", profile.organization_id)
+    .eq("provider", "uazapi");
+
+  revalidatePath("/settings/integrations");
+}
+
+export async function deleteUazapiIntegrationAction(formData: FormData) {
+  const id = String(formData.get("id") || "");
+
+  if (!id) return;
+
+  const supabase = await createClient();
+  const { profile } = await getCurrentProfile(supabase);
+
+  if (!profile) return;
+
+  await supabase
+    .from("integrations")
+    .delete()
+    .eq("id", id)
+    .eq("organization_id", profile.organization_id)
+    .eq("provider", "uazapi");
+
+  revalidatePath("/settings/integrations");
 }
 
 export async function enqueueHauzappProspectionSyncAction() {

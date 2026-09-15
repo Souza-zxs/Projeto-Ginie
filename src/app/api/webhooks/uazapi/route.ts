@@ -112,6 +112,7 @@ export async function POST(request: Request) {
       phone,
       text,
       payload,
+      instanceId: payload.instance ?? null,
       hauzappClienteId: getHauzappClienteId(payload)
     });
 

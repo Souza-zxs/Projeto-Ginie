@@ -1,7 +1,11 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { runLeadAgent } from "@/agents/lead-agent";
 import { normalizeBrazilianPhone } from "@/lib/phone";
-import { configString, getActiveIntegrationConfig } from "@/services/integrations/config";
+import {
+  configString,
+  getActiveIntegrationConfig,
+  getUazapiIntegrationConfig
+} from "@/services/integrations/config";
 import { upsertLeadFromQualification } from "@/services/leads/workflow";
 import { sendUazapiMessage } from "@/services/uazapi/send-message";
 
@@ -26,6 +30,7 @@ type LeadMessageInput = {
   phone: string;
   text: string;
   payload: unknown;
+  instanceId?: string | null;
   hauzappClienteId?: string | null;
 };
 
@@ -35,6 +40,7 @@ export async function processUazapiLeadMessage({
   phone,
   text,
   payload,
+  instanceId,
   hauzappClienteId
 }: LeadMessageInput) {
   const normalizedPhone = normalizeBrazilianPhone(phone) ?? phone.replace(/\D/g, "");
@@ -62,7 +68,7 @@ export async function processUazapiLeadMessage({
     return { processed: true, ai: false, conversationId: conversation.id };
   }
 
-  const agent = await getUazapiLeadAgent(supabase, organizationId);
+  const agent = await getUazapiLeadAgent(supabase, organizationId, instanceId);
   const { data: messages } = await supabase
     .from("messages")
     .select("direction, content")
@@ -95,7 +101,7 @@ export async function processUazapiLeadMessage({
     qualification,
     source: "hauzapp"
   });
-  const uazapiConfig = await getActiveIntegrationConfig(supabase, organizationId, "uazapi");
+  const uazapiConfig = await getUazapiIntegrationConfig(supabase, organizationId, instanceId);
   const result = await sendUazapiMessage({
     phone: normalizedPhone,
     text: qualification.reply,
@@ -130,9 +136,13 @@ export async function processUazapiLeadMessage({
   return { processed: true, ai: true, leadId: lead.id, conversationId: conversation.id };
 }
 
-async function getUazapiLeadAgent(supabase: SupabaseClient, organizationId: string) {
+async function getUazapiLeadAgent(
+  supabase: SupabaseClient,
+  organizationId: string,
+  instanceId?: string | null
+) {
   const hauzappConfig = await getActiveIntegrationConfig(supabase, organizationId, "hauzapp");
-  const uazapiConfig = await getActiveIntegrationConfig(supabase, organizationId, "uazapi");
+  const uazapiConfig = await getUazapiIntegrationConfig(supabase, organizationId, instanceId);
   const agentId =
     configString(hauzappConfig, ["leadAgentId", "lead_agent_id", "uazapiLeadAgentId"]) ||
     configString(uazapiConfig, ["leadAgentId", "lead_agent_id"]);

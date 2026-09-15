@@ -20,6 +20,41 @@ export async function getActiveIntegrationConfig(
   return data?.config ?? {};
 }
 
+/**
+ * Uazapi permite várias instâncias (números) por organização — diferente da
+ * maioria dos providers, que têm uma config única. Quando o webhook informa
+ * de qual instância veio a mensagem (`instanceId`), busca a integração cuja
+ * config.instanceId bate com isso, para responder pelo MESMO número que
+ * recebeu. Sem instanceId (ou sem bater com nenhuma), cai no comportamento
+ * antigo — pega a integração Uazapi ativa mais recente — o que mantém
+ * organizações com um único número funcionando sem precisar configurar nada.
+ */
+export async function getUazapiIntegrationConfig(
+  supabase: SupabaseClient,
+  organizationId: string,
+  instanceId?: string | null
+) {
+  const { data } = await supabase
+    .from("integrations")
+    .select("config")
+    .eq("organization_id", organizationId)
+    .eq("provider", "uazapi")
+    .eq("active", true)
+    .order("created_at", { ascending: false })
+    .returns<Array<{ config: IntegrationConfig | null }>>();
+
+  const rows = data ?? [];
+
+  if (instanceId) {
+    const match = rows.find((row) => configString(row.config ?? {}, ["instanceId"]) === instanceId);
+    if (match) {
+      return match.config ?? {};
+    }
+  }
+
+  return rows[0]?.config ?? {};
+}
+
 export function configString(config: IntegrationConfig, keys: string[], fallback?: string | null) {
   for (const key of keys) {
     const value = config[key];
