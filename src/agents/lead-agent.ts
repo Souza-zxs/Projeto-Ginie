@@ -1,3 +1,4 @@
+import { formatNowForAgent } from "@/lib/datetime";
 import { chatCompletion, hasLlmConfigured, resolveModel, type ChatMessage } from "@/lib/openai/chat";
 
 export type LeadQualification = {
@@ -77,6 +78,8 @@ export async function runLeadAgent(input: LeadAgentInput): Promise<LeadQualifica
         : "",
       input.agent?.agent_skills ? `Skills do agente:\n${input.agent.agent_skills}` : "",
       "- Mesmo devolvendo JSON, o campo reply deve soar como WhatsApp humano e natural.",
+      "",
+      `Agora e ${formatNowForAgent()}. Use isso para decidir se esta dentro ou fora do horario de atendimento.`,
       "",
       "Responda SOMENTE com um objeto JSON valido, sem texto antes ou depois, sem blocos de codigo.",
       "Campos obrigatorios: name, phone, interest, region, budget, paymentMethod, urgency,",

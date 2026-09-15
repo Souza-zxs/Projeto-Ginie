@@ -1,3 +1,4 @@
+import { formatNowForAgent } from "@/lib/datetime";
 import { chatCompletion, hasLlmConfigured, resolveModel, type ChatMessage } from "@/lib/openai/chat";
 
 type ChatAgentInput = {
@@ -27,6 +28,8 @@ export async function runAgentChat(input: ChatAgentInput) {
 
   const systemPrompt = [
     input.agent.system_prompt,
+    "",
+    `Agora e ${formatNowForAgent()}. Use isso para decidir se esta dentro ou fora do horario de atendimento.`,
     "",
     "Regras de cadencia para soar humano:",
     input.agent.greeting_template

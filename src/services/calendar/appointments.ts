@@ -3,15 +3,31 @@ import { publishJobProcessor } from "@/services/qstash/jobs";
 
 type Availability = Record<string, Array<{ start: string; end: string }>>;
 
-const weekdays = [
-  "sunday",
-  "monday",
-  "tuesday",
-  "wednesday",
-  "thursday",
-  "friday",
-  "saturday"
-] as const;
+// Cliente atual (DAR+ / Paisagens Serenas) é de Portugal. As janelas de
+// disponibilidade (weekly_availability) são horário de Lisboa, independente
+// de em que fuso a VPS está configurada — por isso os horários são
+// calculados via Intl.DateTimeFormat (cobre horário de verão automaticamente)
+// em vez de Date.setHours(), que usaria o fuso local do servidor.
+const AGENT_TIMEZONE = "Europe/Lisbon";
+
+type WeekdayKey =
+  | "sunday"
+  | "monday"
+  | "tuesday"
+  | "wednesday"
+  | "thursday"
+  | "friday"
+  | "saturday";
+
+const weekdayKeyByShortName: Record<string, WeekdayKey> = {
+  Sun: "sunday",
+  Mon: "monday",
+  Tue: "tuesday",
+  Wed: "wednesday",
+  Thu: "thursday",
+  Fri: "friday",
+  Sat: "saturday"
+};
 
 export function getAvailableWindows({
   start,
@@ -30,13 +46,14 @@ export function getAvailableWindows({
   const windows: Array<{ startsAt: string; endsAt: string }> = [];
 
   for (let dayOffset = 0; dayOffset < days; dayOffset += 1) {
-    const day = new Date(base);
-    day.setDate(base.getDate() + dayOffset);
-    const periods = availability[weekdays[day.getDay()]] ?? [];
+    const dayInstant = new Date(base.getTime() + dayOffset * 24 * 60 * 60_000);
+    const { year, month, day, weekdayShort } = getZonedDateParts(dayInstant, AGENT_TIMEZONE);
+    const weekdayKey = weekdayKeyByShortName[weekdayShort];
+    const periods = weekdayKey ? availability[weekdayKey] ?? [] : [];
 
     for (const period of periods) {
-      const cursor = applyTime(day, period.start);
-      const periodEnd = applyTime(day, period.end);
+      const cursor = zonedTimeToUtc(year, month, day, period.start, AGENT_TIMEZONE);
+      const periodEnd = zonedTimeToUtc(year, month, day, period.end, AGENT_TIMEZONE);
 
       while (cursor.getTime() + durationMinutes * 60_000 <= periodEnd.getTime()) {
         const end = new Date(cursor.getTime() + durationMinutes * 60_000);
@@ -48,7 +65,7 @@ export function getAvailableWindows({
           });
         }
 
-        cursor.setMinutes(cursor.getMinutes() + granularityMinutes);
+        cursor.setUTCMinutes(cursor.getUTCMinutes() + granularityMinutes);
       }
     }
   }
@@ -133,9 +150,49 @@ export async function createVisitAppointment({
   return appointment;
 }
 
-function applyTime(day: Date, time: string) {
-  const [hours, minutes] = time.split(":").map(Number);
-  const date = new Date(day);
-  date.setHours(hours ?? 0, minutes ?? 0, 0, 0);
-  return date;
+/** Ano/mes/dia e nome curto do dia da semana (en-US: Mon, Tue...), lidos no fuso informado. */
+function getZonedDateParts(date: Date, timeZone: string) {
+  const parts = Object.fromEntries(
+    new Intl.DateTimeFormat("en-US", {
+      timeZone,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      weekday: "short"
+    })
+      .formatToParts(date)
+      .map((part) => [part.type, part.value])
+  );
+
+  return {
+    year: Number(parts.year),
+    month: Number(parts.month),
+    day: Number(parts.day),
+    weekdayShort: parts.weekday
+  };
+}
+
+/** Converte "ano-mes-dia HH:mm" NO FUSO informado (ex.: Europe/Lisbon) para o instante UTC correspondente. */
+function zonedTimeToUtc(year: number, month: number, day: number, time: string, timeZone: string) {
+  const [hour = 0, minute = 0] = time.split(":").map(Number);
+  const utcGuess = Date.UTC(year, month - 1, day, hour, minute);
+
+  const parts = Object.fromEntries(
+    new Intl.DateTimeFormat("en-US", {
+      timeZone,
+      hour12: false,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit"
+    })
+      .formatToParts(new Date(utcGuess))
+      .map((part) => [part.type, part.value])
+  );
+
+  const readHour = parts.hour === "24" ? 0 : Number(parts.hour);
+  const tzGuess = Date.UTC(Number(parts.year), Number(parts.month) - 1, Number(parts.day), readHour, Number(parts.minute));
+
+  return new Date(utcGuess - (tzGuess - utcGuess));
 }
