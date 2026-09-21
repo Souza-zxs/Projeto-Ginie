@@ -11,6 +11,17 @@
 
 const DEFAULT_BASE_URL = "https://api.openai.com/v1";
 
+// Limite para o modelo responder. Fica abaixo dos 60s padrão do nginx, para o
+// usuário receber um erro legível em vez de um 504 do proxy. Ajustável por
+// LLM_TIMEOUT_MS (ex.: modelo local em CPU, que demora mais na primeira chamada).
+const DEFAULT_TIMEOUT_MS = 50_000;
+
+function getTimeoutMs() {
+  const configured = Number(process.env.LLM_TIMEOUT_MS);
+
+  return Number.isFinite(configured) && configured > 0 ? configured : DEFAULT_TIMEOUT_MS;
+}
+
 export type ChatMessage = {
   role: "system" | "user" | "assistant";
   content: string;
@@ -61,6 +72,7 @@ export async function chatCompletion(
   params: ChatCompletionParams
 ): Promise<ChatCompletionResult> {
   const { baseUrl, apiKey } = getOpenAIConfig();
+  const timeoutMs = getTimeoutMs();
 
   let response: Response;
 
@@ -76,9 +88,18 @@ export async function chatCompletion(
         model: params.model,
         messages: params.messages,
         ...(params.responseFormat ? { response_format: params.responseFormat } : {})
-      })
+      }),
+      signal: AbortSignal.timeout(timeoutMs)
     });
   } catch (error) {
+    if (error instanceof Error && error.name === "TimeoutError") {
+      return {
+        ok: false,
+        content: null,
+        error: `O modelo demorou mais de ${Math.round(timeoutMs / 1000)}s para responder (${baseUrl}).`
+      };
+    }
+
     return {
       ok: false,
       content: null,
