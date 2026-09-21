@@ -1,4 +1,5 @@
 import Image from "next/image";
+import Link from "next/link";
 import { LoginForm } from "./login-form";
 
 export default async function LoginPage({
@@ -9,7 +10,7 @@ export default async function LoginPage({
   const params = await searchParams;
 
   return (
-    <main className="relative flex min-h-screen items-center overflow-hidden bg-background px-6 py-16 lg:pl-[12vw]">
+    <main className="relative flex min-h-screen items-center justify-center overflow-hidden bg-background px-6 py-16">
       {/* Glow assimétrico + trama de pontos: textura de marca sem cair no gradiente roxo/azul genérico */}
       <div
         aria-hidden
@@ -33,18 +34,18 @@ export default async function LoginPage({
           width={168}
           height={70}
           priority
-          className="h-auto w-[168px]"
+          className="mx-auto h-auto w-[168px]"
         />
 
-        <div className="mt-10 mb-9">
+        <div className="mt-10 mb-9 text-center">
           <p className="text-xs font-semibold uppercase tracking-[0.14em] text-primary">
             Acesso à plataforma
           </p>
           <h1 className="mt-3 font-display text-[2.1rem] leading-[1.15] text-slate-950">
             Bem-vindo <em className="italic text-primary">de volta</em>
           </h1>
-          <span aria-hidden className="mt-4 block h-[3px] w-12 rounded-full bg-primary" />
-          <p className="mt-5 max-w-sm text-sm leading-6 text-muted-foreground">
+          <span aria-hidden className="mx-auto mt-4 block h-[3px] w-12 rounded-full bg-primary" />
+          <p className="mx-auto mt-5 max-w-sm text-sm leading-6 text-muted-foreground">
             Entre para gerenciar campanhas, conversas, leads e equipe.
           </p>
         </div>
@@ -52,6 +53,17 @@ export default async function LoginPage({
         <div className="rounded-2xl border bg-card p-7 shadow-soft">
           <LoginForm redirectTo={params.redirectTo} />
         </div>
+
+        <p className="mt-6 text-center text-sm text-foreground/70">
+          Ao entrar, você concorda com o tratamento de dados descrito na{" "}
+          <Link
+            href="/privacidade"
+            className="font-medium text-foreground underline decoration-primary decoration-2 underline-offset-4 hover:decoration-foreground focus-visible:rounded-sm focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-primary"
+          >
+            Política de Privacidade
+          </Link>
+          .
+        </p>
       </section>
     </main>
   );
