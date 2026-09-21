@@ -2,6 +2,15 @@ import { Badge } from "@/components/badge";
 import { PageHeader } from "@/components/page-header";
 import { getCurrentProfile } from "@/lib/auth/organization";
 import { createClient } from "@/lib/supabase/server";
+import { formatVisitDateTime } from "@/services/calendar/slots";
+
+// "proposed" = horários oferecidos, aguardando o lead escolher (ainda não é uma visita marcada).
+const STATUS_LABEL: Record<string, string> = {
+  proposed: "Aguardando escolha",
+  confirmed: "Confirmada",
+  pending: "Pendente",
+  pending_google: "Pendente"
+};
 
 type Appointment = {
   id: string;
@@ -69,14 +78,13 @@ export default async function AppointmentsPage() {
                     </p>
                   </td>
                   <td className="px-4 py-3 text-slate-700">
-                    {new Intl.DateTimeFormat("pt-BR", {
-                      dateStyle: "short",
-                      timeStyle: "short"
-                    }).format(new Date(appointment.starts_at))}
+                    {appointment.status === "proposed"
+                      ? "A definir"
+                      : formatVisitDateTime(appointment.starts_at)}
                   </td>
                   <td className="px-4 py-3">
                     <Badge tone={appointment.status === "confirmed" ? "success" : "muted"}>
-                      {appointment.status}
+                      {STATUS_LABEL[appointment.status] ?? appointment.status}
                     </Badge>
                   </td>
                 </tr>

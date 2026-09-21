@@ -2,6 +2,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { renderTemplate } from "@/lib/templates";
 import { configString, getActiveIntegrationConfig } from "@/services/integrations/config";
 import { sendMetaMessage } from "@/services/meta/send-message";
+import { formatVisitDateTime } from "@/services/calendar/slots";
 import { publishJobProcessor } from "@/services/qstash/jobs";
 import { sendUazapiMessage } from "@/services/uazapi/send-message";
 
@@ -259,8 +260,8 @@ export async function processAppointmentReminder(supabase: SupabaseClient, job: 
   if (!appointment || appointment.reminder_sent_at) return markDone(supabase, job.id, "cancelled", "already_sent");
   const phone = appointment.contacts?.phone || appointment.leads?.phone;
   if (phone) {
-    const when = new Intl.DateTimeFormat("pt-BR", { dateStyle: "short", timeStyle: "short" }).format(new Date(appointment.starts_at));
-    await sendMetaMessage({ phone, text: `Ola, passando para confirmar sua visita ao decorado em ${when}. Esta tudo certo para voce?` });
+    const when = formatVisitDateTime(appointment.starts_at);
+    await sendMetaMessage({ phone, text: `Olá, passando para confirmar a sua visita em ${when}. Está tudo certo?` });
   }
   await supabase.from("appointments").update({ reminder_sent_at: new Date().toISOString() }).eq("id", appointment.id);
   return markDone(supabase, job.id, "done", "appointment_reminded");

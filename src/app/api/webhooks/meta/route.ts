@@ -1,7 +1,18 @@
 import { NextResponse } from "next/server";
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { runLeadAgent } from "@/agents/lead-agent";
-import { createVisitAppointment, getAvailableWindows } from "@/services/calendar/appointments";
+import {
+  confirmProposedVisit,
+  getAvailableWindows,
+  getBusySlots,
+  getOpenProposal,
+  proposeVisitSlots
+} from "@/services/calendar/appointments";
+import {
+  formatSlotOptions,
+  formatVisitConfirmation,
+  parseSlotChoice
+} from "@/services/calendar/slots";
 import { scheduleLeadFollowups } from "@/services/followups/lead-followups";
 import { upsertLeadFromQualification } from "@/services/leads/workflow";
 import { enqueueHumanizedMetaMessages } from "@/services/messaging/enqueue-humanized";
@@ -365,7 +376,7 @@ async function respondWithAgent({
   sourceMessageId: string | null;
   sourceCreatedAt: string;
 }) {
-  const [{ data: campaign }, { data: messages }, { data: materials }] = await Promise.all([
+  const [{ data: campaign }, { data: recentMessages }, { data: materials }] = await Promise.all([
     contact.campaign_id
       ? supabase
           .from("campaigns")
@@ -378,7 +389,7 @@ async function respondWithAgent({
       .select("direction, content")
       .eq("organization_id", organizationId)
       .eq("conversation_id", conversationId)
-      .order("created_at", { ascending: true })
+      .order("created_at", { ascending: false })
       .limit(30)
       .returns<AgentMessage[]>(),
     contact.campaign_id
@@ -411,6 +422,64 @@ async function respondWithAgent({
         .returns<Array<{ title: string; description: string | null; media_type: string; public_url: string | null }>>()
     : { data: [] };
 
+  // O limit(30) acima traz as 30 mais RECENTES (ordem decrescente); aqui voltam à ordem cronológica.
+  // Antes era ascendente: numa conversa com mais de 30 mensagens o agente não via as últimas.
+  const messages = [...(recentMessages ?? [])].reverse();
+
+  const deliverReply = async (text: string, stage?: string) => {
+    const sentAt = new Date().toISOString();
+
+    await supabase
+      .from("conversations")
+      .update({
+        ...(stage ? { current_stage: stage } : {}),
+        last_message_at: sentAt
+      })
+      .eq("id", conversationId);
+
+    await enqueueHumanizedMetaMessages({
+      supabase,
+      organizationId,
+      conversationId,
+      contactId: contact.id,
+      phone: contact.phone,
+      text,
+      sourceMessageId,
+      sourceCreatedAt,
+      splitEnabled: agent?.message_split_enabled ?? true,
+      wordsPerMinute: agent?.typing_words_per_minute ?? 150
+    });
+
+    await scheduleLeadFollowups({
+      supabase,
+      organizationId,
+      conversationId,
+      contactId: contact.id,
+      scheduledAfter: sentAt
+    });
+  };
+
+  // Se o lead está respondendo a uma oferta de horários, confirma a escolha direto,
+  // sem chamar o modelo (que é lento em CPU) e sem risco de ele contradizer o horário.
+  const proposal = await getOpenProposal(supabase, conversationId);
+  const lastInbound = [...messages].reverse().find((message) => message.direction === "inbound")?.content ?? "";
+  const chosenIndex = proposal ? parseSlotChoice(lastInbound, proposal.slots) : null;
+
+  if (proposal && chosenIndex !== null) {
+    const slot = proposal.slots[chosenIndex];
+    const confirmed = await confirmProposedVisit({
+      supabase,
+      organizationId,
+      proposalId: proposal.id,
+      slot
+    });
+
+    if (confirmed) {
+      await deliverReply(formatVisitConfirmation(slot));
+      return;
+    }
+  }
+
   const qualification = await runLeadAgent({
     contact: {
       name: contact.name,
@@ -437,7 +506,7 @@ async function respondWithAgent({
         }
       : campaign,
     agent,
-    messages: messages ?? []
+    messages
   });
 
   const lead = await upsertLeadFromQualification({
@@ -450,70 +519,33 @@ async function respondWithAgent({
   });
   let reply = qualification.reply;
 
-  if (qualification.wantsVisit && agent?.appointment_enabled) {
+  // Só oferece horários quando ainda não há uma oferta aberta: repetir a oferta a cada
+  // mensagem é ruído para o lead (e antes gerava uma visita e lembretes duplicados).
+  if (qualification.wantsVisit && agent?.appointment_enabled && !proposal) {
+    const busy = await getBusySlots(supabase, organizationId);
     const windows = getAvailableWindows({
       durationMinutes: agent.appointment_duration_minutes,
-      availability: agent.weekly_availability
-    });
+      availability: agent.weekly_availability,
+      busy
+    }).slice(0, 3);
 
     if (windows.length > 0) {
-      const options = windows
-        .slice(0, 3)
-        .map((window) =>
-          new Intl.DateTimeFormat("pt-BR", {
-            weekday: "long",
-            day: "2-digit",
-            month: "2-digit",
-            hour: "2-digit",
-            minute: "2-digit"
-          }).format(new Date(window.startsAt))
-        )
-        .join("\n");
+      reply = `${reply}\n\n${formatSlotOptions(windows)}`;
 
-      reply = `${reply}\n\nTenho esses horários para a visita ao decorado:\n${options}\n\nQual deles fica melhor pra você?`;
-
-      await createVisitAppointment({
+      // Apenas registra a oferta: a visita só é marcada quando o lead escolher (ver acima).
+      await proposeVisitSlots({
         supabase,
         organizationId,
         leadId: lead.id,
         conversationId,
         contactId: contact.id,
         agentId: campaign?.agent_id ?? null,
-        title: `Visita decorado - ${contact.name ?? contact.phone}`,
+        title: `Visita técnica - ${contact.name ?? contact.phone}`,
         description: qualification.summary,
-        startsAt: windows[0].startsAt,
-        durationMinutes: agent.appointment_duration_minutes
+        slots: windows
       });
     }
   }
 
-  const sentAt = new Date().toISOString();
-  await supabase
-    .from("conversations")
-    .update({
-      current_stage: qualification.stage,
-      last_message_at: sentAt
-    })
-    .eq("id", conversationId);
-
-  await enqueueHumanizedMetaMessages({
-    supabase,
-    organizationId,
-    conversationId,
-    contactId: contact.id,
-    phone: contact.phone,
-    text: reply,
-    sourceMessageId,
-    sourceCreatedAt,
-    splitEnabled: agent?.message_split_enabled ?? true,
-    wordsPerMinute: agent?.typing_words_per_minute ?? 150
-  });
-
-  await scheduleLeadFollowups({
-    supabase,
-    organizationId,
-    conversationId,
-    contactId: contact.id,
-    scheduledAfter: sentAt
-  });
+  await deliverReply(reply, qualification.stage);
 }
