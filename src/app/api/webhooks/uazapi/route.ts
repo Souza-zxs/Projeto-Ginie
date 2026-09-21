@@ -36,7 +36,8 @@ export async function POST(request: Request) {
   const webhookSecret = process.env.UAZAPI_WEBHOOK_SECRET;
   const providedSecret = new URL(request.url).searchParams.get("token");
 
-  if (webhookSecret && providedSecret !== webhookSecret) {
+  // Em produção, sem UAZAPI_WEBHOOK_SECRET o webhook recusa tudo (fail-closed).
+  if ((webhookSecret || process.env.NODE_ENV === "production") && providedSecret !== webhookSecret) {
     return NextResponse.json({ error: "Invalid webhook token." }, { status: 401 });
   }
 

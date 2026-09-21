@@ -72,7 +72,11 @@ async function processJobs(request: Request) {
     }
   } else if (secret) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  } else if (!secret && (process.env.QSTASH_TOKEN || process.env.QSTASH_CURRENT_SIGNING_KEY)) {
+  } else if (
+    process.env.NODE_ENV === "production" ||
+    process.env.QSTASH_TOKEN ||
+    process.env.QSTASH_CURRENT_SIGNING_KEY
+  ) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
