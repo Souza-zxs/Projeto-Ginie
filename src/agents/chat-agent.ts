@@ -29,8 +29,6 @@ export async function runAgentChat(input: ChatAgentInput) {
   const systemPrompt = [
     input.agent.system_prompt,
     "",
-    `Agora e ${formatNowForAgent()}. Use isso para decidir se esta dentro ou fora do horario de atendimento.`,
-    "",
     "Regras de cadencia para soar humano:",
     input.agent.greeting_template
       ? `Saudacao preferida para resposta curta: ${input.agent.greeting_template}`
@@ -65,6 +63,14 @@ export async function runAgentChat(input: ChatAgentInput) {
       content: message.content || ""
     }))
   ];
+
+  // A hora vai na ultima mensagem, e nao no system, para o system ficar identico entre
+  // chamadas e o Ollama reaproveitar o cache do prompt.
+  const last = messages[messages.length - 1];
+
+  if (last?.role === "user") {
+    last.content = `${last.content}\n\n[Agora e ${formatNowForAgent()}. Use isso para decidir se esta dentro ou fora do horario de atendimento.]`;
+  }
 
   const result = await chatCompletion({
     model: resolveModel(input.agent.openai_model),

@@ -77,9 +77,18 @@ export async function runLeadAgent(input: LeadAgentInput): Promise<LeadQualifica
         ? `Exemplos bons:\n${input.agent.conversation_examples}`
         : "",
       input.agent?.agent_skills ? `Skills do agente:\n${input.agent.agent_skills}` : "",
+      input.agent?.qualification_criteria
+        ? `Criterios de qualificacao: ${input.agent.qualification_criteria}`
+        : "",
+      input.agent?.handoff_instructions
+        ? `Encaminhamento: ${input.agent.handoff_instructions}`
+        : "",
       "- Mesmo devolvendo JSON, o campo reply deve soar como WhatsApp humano e natural.",
       "",
-      `Agora e ${formatNowForAgent()}. Use isso para decidir se esta dentro ou fora do horario de atendimento.`,
+      // Este texto e a hora vao em partes diferentes de proposito: o system fica identico
+      // entre chamadas (o Ollama reaproveita o cache do prompt) e so o campo `now`, no fim
+      // da mensagem do usuario, muda.
+      "O campo `now` do JSON do usuario traz a data e hora atuais. Use isso para decidir se esta dentro ou fora do horario de atendimento.",
       "",
       "Responda SOMENTE com um objeto JSON valido, sem texto antes ou depois, sem blocos de codigo.",
       "Campos obrigatorios: name, phone, interest, region, budget, paymentMethod, urgency,",
@@ -94,14 +103,14 @@ export async function runLeadAgent(input: LeadAgentInput): Promise<LeadQualifica
       { role: "system", content: systemPrompt },
       {
         role: "user",
+        // Ordem: o que quase nao muda primeiro, o que cresce depois (messages) e o que muda
+        // a cada minuto por ultimo (now). Isso maximiza o trecho reaproveitado do cache.
         content: JSON.stringify({
-          agent: input.agent,
-          qualificationCriteria: input.agent?.qualification_criteria,
-          handoffInstructions: input.agent?.handoff_instructions,
           instruction: input.campaign?.agent_prompt,
           service: input.campaign?.property_description,
           contact: input.contact,
-          messages: input.messages
+          messages: input.messages,
+          now: formatNowForAgent()
         })
       }
     ];
