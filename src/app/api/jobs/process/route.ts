@@ -42,6 +42,13 @@ type ScheduledJob = {
   payload: SendJobPayload & Record<string, unknown>;
 };
 
+type JobResult = Record<string, unknown>;
+
+const JOB_BATCH_SIZE = 10;
+// Orçamento de tempo por chamada, abaixo do limite de execução da função na Vercel.
+const DRAIN_BUDGET_MS = 25_000;
+const ORPHAN_AFTER_MS = 10 * 60_000;
+
 export async function POST(request: Request) {
   return processJobs(request);
 }
@@ -92,25 +99,86 @@ async function processJobs(request: Request) {
       { status: 500 }
     );
   }
+
+  await rescueOrphanedJobs(supabase);
+
+  const results: JobResult[] = [];
+  const deadline = Date.now() + DRAIN_BUDGET_MS;
+
+  // Esvazia os jobs vencidos em lotes, até acabar o tempo ou não haver mais lote cheio.
+  while (Date.now() < deadline) {
+    const batch = await runDueJobsBatch(supabase);
+
+    if (batch.error) {
+      return NextResponse.json({ error: batch.error }, { status: 500 });
+    }
+
+    results.push(...batch.results);
+
+    if (batch.fetched < JOB_BATCH_SIZE) {
+      break;
+    }
+  }
+
+  const nextProcessor = await publishNextPendingJobProcessor(supabase).catch((error) => ({
+    published: false,
+    reason: error instanceof Error ? error.message : "qstash_publish_failed"
+  }));
+
+  return NextResponse.json({ processed: results.length, results, nextProcessor });
+}
+
+/**
+ * Jobs em "running" há mais de ORPHAN_AFTER_MS perderam o executor (a função
+ * caiu ou estourou o tempo). Viram "failed" com o motivo, em vez de ficarem
+ * presos para sempre. Não reexecuta: repetir um envio de WhatsApp que talvez
+ * já tenha saído mandaria mensagem em dobro para o cliente.
+ */
+async function rescueOrphanedJobs(supabase: ReturnType<typeof createAdminClient>) {
+  const now = new Date().toISOString();
+  const cutoff = new Date(Date.now() - ORPHAN_AFTER_MS).toISOString();
+  const { data: orphans } = await supabase
+    .from("scheduled_jobs")
+    .select("id, payload")
+    .eq("status", "running")
+    .or(`executed_at.is.null,executed_at.lt.${cutoff}`)
+    .limit(50)
+    .returns<Array<{ id: string; payload: Record<string, unknown> }>>();
+
+  for (const orphan of orphans ?? []) {
+    await supabase
+      .from("scheduled_jobs")
+      .update({
+        status: "failed",
+        executed_at: now,
+        payload: { ...orphan.payload, error: "orphaned_job: ficou em execucao sem concluir" }
+      })
+      .eq("id", orphan.id)
+      .eq("status", "running");
+  }
+}
+
+async function runDueJobsBatch(supabase: ReturnType<typeof createAdminClient>) {
   const { data: jobs, error } = await supabase
     .from("scheduled_jobs")
     .select("id, organization_id, target_id, job_type, payload")
     .eq("status", "pending")
     .lte("run_at", new Date().toISOString())
     .order("run_at", { ascending: true })
-    .limit(10)
+    .limit(JOB_BATCH_SIZE)
     .returns<ScheduledJob[]>();
 
   if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    return { error: error.message, results: [] as JobResult[], fetched: 0 };
   }
 
-  const results = [];
+  const results: JobResult[] = [];
 
   for (const job of jobs ?? []) {
     const { data: claimedJob, error: claimError } = await supabase
       .from("scheduled_jobs")
-      .update({ status: "running" })
+      // executed_at guarda o início da execução; quem concluir sobrescreve com o fim.
+      .update({ status: "running", executed_at: new Date().toISOString() })
       .eq("id", job.id)
       .eq("status", "pending")
       .select("id")
@@ -384,12 +452,7 @@ async function processJobs(request: Request) {
     }
   }
 
-  const nextProcessor = await publishNextPendingJobProcessor(supabase).catch((error) => ({
-    published: false,
-    reason: error instanceof Error ? error.message : "qstash_publish_failed"
-  }));
-
-  return NextResponse.json({ processed: results.length, results, nextProcessor });
+  return { error: null, results, fetched: jobs?.length ?? 0 };
 }
 
 async function processMetaSendMessage(
