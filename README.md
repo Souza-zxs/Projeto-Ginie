@@ -12,7 +12,8 @@ Nenhuma credencial real está neste repositório. Configure tudo pelo `.env.loca
 - Dashboard operacional com métricas de contatos, mensagens, respostas, campanhas, jobs e agentes.
 - Campanhas outbound por Meta WhatsApp Cloud API ou Uazapi.
 - Importação de contatos por CSV/XLSX, lista colada ou reaproveitamento de contatos antigos sem envio.
-- Normalização de telefone para `55DDDNUMERO` (ajuste para o formato de Portugal/Angola/Moçambique se necessário — ver nota abaixo).
+- Normalização de telefone para Portugal (`351` + 9 dígitos) e Brasil (`55` + DDD), em `src/lib/phone.ts`.
+- Página pública de Política de Privacidade em `/privacidade` (sem login), usada também na configuração do app da Meta.
 - Inbox com conversas, mídias, resposta manual, status da IA e contexto do lead.
 - Agentes de IA configuráveis pelo front-end, usando **ChatGPT (OpenAI)** como LLM.
 - Marca DAR+ (logo laranja/cinza) aplicada como padrão do produto, com white-label ainda disponível por organização.
@@ -48,6 +49,9 @@ src/agents/lead-agent.ts          Cérebro do agente (ChatGPT + qualificação d
 src/app/api/webhooks/meta         Webhook Meta
 src/app/api/webhooks/uazapi       Webhook Uazapi
 src/app/api/jobs/process          Processador de jobs
+src/app/privacidade               Política de Privacidade (pública)
+src/services/calendar/slots.ts    Horários de visita (fuso de Lisboa) e leitura da escolha do lead
+scripts/job-runner.mjs            Runner que aciona o processador de jobs (roda na VPS)
 supabase/migrations               Schema do banco
 ```
 
@@ -76,7 +80,7 @@ OPENAI_API_KEY=
 APP_URL=http://localhost:3000
 ```
 
-4. Crie um **projeto Supabase novo e próprio** para a Paisagens Serenas (não reaproveite o do crm-imobiliario original) e aplique todas as migrations em `supabase/migrations`, na ordem, pelo SQL editor do Supabase ou via `supabase db push`.
+4. Crie um **projeto Supabase novo e próprio** para a DAR+ (não reaproveite o do crm-imobiliario original) e aplique todas as migrations em `supabase/migrations`, na ordem, pelo SQL editor do Supabase ou via `supabase db push`.
 
 5. Rode o projeto:
 
@@ -140,7 +144,37 @@ O que **não** foi adaptado, por decisão consciente (baixo risco vs. baixo reto
 - **Integração HauzApp e webhook Canal Pro**: são ferramentas de portal imobiliário (sincronização de imóveis/leads) que a DAR+ provavelmente não usa. O código e os botões (`Sincronizar HauzApp`, campo `ID HauzApp` em Equipe) ficaram no sistema, mas são opcionais — ignore-os se não fizer sentido para o negócio. Se quiser, dá pra remover depois.
 - **Mensagens internas em `src/services/broker-sla/workflow.ts` e `src/services/hauzapp/workflow.ts`**: templates de WhatsApp enviados internamente para a equipe (cobrança de follow-up, escalonamento) ainda mencionam "corretor" em alguns pontos. Não afeta o que o cliente final vê — só a equipe interna. Ajuste se incomodar.
 - **Automações n8n** (`n8n-mcp-main/` no projeto original): não foram copiadas para este projeto. O fluxo principal (agente de IA + WhatsApp) funciona inteiramente pelas rotas do Next.js (`/api/webhooks/meta`, `/api/webhooks/uazapi`), sem depender de n8n. Se precisar de automações externas no futuro, isso pode ser adicionado separadamente.
-- **Normalização de telefone**: o sistema formata números como `55DDDNUMERO` (padrão Brasil). Se a DAR+ atender outro país (Portugal, Angola, etc.), ajuste a normalização em `src/services/*` antes de ir para produção.
+- **Normalização de telefone**: `src/lib/phone.ts` reconhece Portugal e Brasil. Um número de 9 dígitos sem código do país é tratado como português; outros países (Angola, Moçambique etc.) só funcionam se o número já vier com o código.
+
+## Produção (VPS)
+
+O app roda numa VPS com pm2 e nginx (HTTPS no domínio). Para atualizar:
+
+```bash
+cd /opt/Projeto-Ginie && git pull origin master && npm ci && npm run build && pm2 restart ginie
+```
+
+Depois de um deploy, recarregue o navegador com Ctrl+F5: abas antigas geram o erro "Failed to find Server Action".
+
+**Variáveis obrigatórias em produção.** As rotas abaixo falham fechado (respondem 401) quando o segredo não está definido:
+
+| Variável | Protege |
+|---|---|
+| `CRON_SECRET` | `/api/jobs/process` |
+| `UAZAPI_WEBHOOK_SECRET` | `/api/webhooks/uazapi` (a URL cadastrada na Uazapi deve terminar com `?token=<valor>`) |
+| `META_APP_SECRET` | `/api/webhooks/meta` (assinatura `x-hub-signature-256`) |
+
+**Runner de jobs.** A Vercel/nginx não têm "relógio": alguém precisa chamar `/api/jobs/process` a cada poucos segundos. Sem isso, as respostas do agente pela Meta, os follow-ups e os lembretes **não são enviados**. O `scripts/job-runner.mjs` faz essa chamada (a cada 5 s) e deve rodar como um processo à parte, com `APP_URL` (o endereço em que o app responde) e o mesmo `CRON_SECRET`:
+
+```bash
+APP_URL=http://127.0.0.1:8080 CRON_SECRET=<o mesmo do .env> pm2 start scripts/job-runner.mjs --name ginie-jobs
+```
+
+**Modelo local (Ollama) em CPU.**
+- Nunca exponha a porta do Ollama (11434) à internet.
+- `LLM_TIMEOUT_MS` (padrão 50000) limita a espera pelo modelo. Em CPU, a primeira chamada com o prompt "frio" pode levar mais de 80 s; o nginx corta em 60 s (`proxy_read_timeout`) se você não aumentar.
+- Os prompts dos agentes mantêm o texto fixo primeiro e a hora atual por último de propósito: assim o Ollama reaproveita o cache do prompt e as respostas seguintes saem em segundos. Ao editar `src/agents/*.ts`, preserve essa ordem.
+- Mantenha o modelo carregado (`OLLAMA_KEEP_ALIVE=-1`) para não perder o cache.
 
 ## Variáveis De Ambiente
 
@@ -168,6 +202,7 @@ Principais grupos:
 ```bash
 npm run lint
 npm run typecheck
+npm test        # testes nativos do Node (requer Node 22.18+)
 npm run build
 npm run dev
 ```
