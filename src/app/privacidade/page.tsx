@@ -10,6 +10,8 @@ export const metadata: Metadata = {
 };
 
 const LAST_UPDATE = "21/09/2026";
+const COMPANY_CNPJ = "64.150.131/0001-38";
+const PRIVACY_EMAIL = "horizontecnologiaa@gmail.com";
 
 const sections = [
   { id: "quem-somos", title: "Quem somos e qual é o nosso papel" },
@@ -75,6 +77,14 @@ function SummaryRow({ label, children }: { label: string; children: ReactNode })
 const linkClass =
   "font-medium text-foreground underline decoration-primary decoration-2 underline-offset-4 hover:decoration-foreground focus-visible:rounded-sm focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-primary";
 
+function PrivacyEmail() {
+  return (
+    <a href={`mailto:${PRIVACY_EMAIL}`} className={linkClass}>
+      {PRIVACY_EMAIL}
+    </a>
+  );
+}
+
 export default function PrivacyPolicyPage() {
   return (
     <div className="min-h-screen bg-background">
@@ -117,17 +127,15 @@ export default function PrivacyPolicyPage() {
 
         <dl className="mt-10 max-w-3xl overflow-hidden rounded-lg border bg-card">
           <SummaryRow label="Responsável pelos dados">Horizon LTDA</SummaryRow>
-          <SummaryRow label="CNPJ">
-            <Pendente />
-          </SummaryRow>
+          <SummaryRow label="CNPJ">{COMPANY_CNPJ}</SummaryRow>
           <SummaryRow label="Sede">
             João Pessoa/PB, Brasil · endereço completo <Pendente />
           </SummaryRow>
           <SummaryRow label="Contato de privacidade">
-            <Pendente>e-mail a definir</Pendente>
+            <PrivacyEmail />
           </SummaryRow>
           <SummaryRow label="Encarregado (DPO)">
-            <Pendente />
+            Daniel Lucas, pelo mesmo e-mail de contato
           </SummaryRow>
           <SummaryRow label="Leis aplicáveis">
             LGPD (Lei nº 13.709/2018, Brasil) e RGPD (Regulamento (UE) 2016/679, União Europeia)
@@ -383,8 +391,7 @@ export default function PrivacyPolicyPage() {
 
             <Section id="contato" number={14} title="Contato e autoridades">
               <p>
-                Dúvidas, pedidos e reclamações sobre privacidade: <Pendente>e-mail a definir</Pendente>
-                .
+                Dúvidas, pedidos e reclamações sobre privacidade: <PrivacyEmail />.
               </p>
               <p>
                 Você também pode reclamar à autoridade de proteção de dados do seu país: no Brasil, a{" "}
