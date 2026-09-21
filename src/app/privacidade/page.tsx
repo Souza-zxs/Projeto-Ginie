@@ -128,9 +128,7 @@ export default function PrivacyPolicyPage() {
         <dl className="mt-10 max-w-3xl overflow-hidden rounded-lg border bg-card">
           <SummaryRow label="Responsável pelos dados">Horizon LTDA</SummaryRow>
           <SummaryRow label="CNPJ">{COMPANY_CNPJ}</SummaryRow>
-          <SummaryRow label="Sede">
-            João Pessoa/PB, Brasil · endereço completo <Pendente />
-          </SummaryRow>
+          <SummaryRow label="Sede">Rua Bananeiras, 361, Manaíra, João Pessoa/PB, Brasil</SummaryRow>
           <SummaryRow label="Contato de privacidade">
             <PrivacyEmail />
           </SummaryRow>
