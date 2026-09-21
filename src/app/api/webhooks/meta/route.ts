@@ -273,7 +273,8 @@ function isValidMetaSignature(rawBody: string, signatureHeader: string | null) {
   const appSecret = process.env.META_APP_SECRET;
 
   if (!appSecret) {
-    return true;
+    // Em produção, sem META_APP_SECRET não há como validar a origem: recusa (fail-closed).
+    return process.env.NODE_ENV !== "production";
   }
 
   if (!signatureHeader?.startsWith("sha256=")) {
