@@ -55,7 +55,14 @@ export default async function LoginPage({
         </div>
 
         <p className="mt-6 text-center text-sm text-foreground/70">
-          Ao entrar, você concorda com o tratamento de dados descrito na{" "}
+          Ao entrar, você concorda com os{" "}
+          <Link
+            href="/termos"
+            className="font-medium text-foreground underline decoration-primary decoration-2 underline-offset-4 hover:decoration-foreground focus-visible:rounded-sm focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-primary"
+          >
+            Termos de Uso
+          </Link>{" "}
+          e com a{" "}
           <Link
             href="/privacidade"
             className="font-medium text-foreground underline decoration-primary decoration-2 underline-offset-4 hover:decoration-foreground focus-visible:rounded-sm focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-primary"
