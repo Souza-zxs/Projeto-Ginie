@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import Link from "next/link";
 import {
   LegalFooter,
   LegalHeader,
@@ -6,7 +7,6 @@ import {
   LegalSection,
   LegalSidebar,
   LegalSummaryRow,
-  Pendente,
   legalLinkClass
 } from "@/components/legal/legal-page";
 
@@ -174,8 +174,7 @@ export default function PrivacyPolicyPage() {
               </p>
               <p>
                 O modelo que gera as respostas é executado em infraestrutura operada pela Horizon,
-                sem envio do conteúdo das conversas a um provedor de IA de terceiros.{" "}
-                <Pendente>confirmar antes de publicar</Pendente>
+                sem envio do conteúdo das conversas a um provedor de IA de terceiros.
               </p>
             </LegalSection>
 
@@ -218,9 +217,7 @@ export default function PrivacyPolicyPage() {
                 previstas em lei, como cláusulas contratuais padrão e prestadores com compromissos
                 reconhecidos de proteção de dados (LGPD, arts. 33 a 36; RGPD, arts. 44 a 49).
               </p>
-              <p>
-                Região de armazenamento do banco de dados: <Pendente />
-              </p>
+              <p>Região de armazenamento do banco de dados: América do Sul (São Paulo).</p>
             </LegalSection>
 
             <LegalSection id="retencao" number={7} title="Por quanto tempo guardamos">
@@ -230,7 +227,9 @@ export default function PrivacyPolicyPage() {
                 dados são eliminados ou anonimizados.
               </p>
               <p>
-                Prazo de retenção das conversas e dos dados de contato: <Pendente />
+                Prazo de retenção das conversas e dos dados de contato: até 5 anos após o
+                encerramento do seu atendimento, tempo alinhado ao que pode ser necessário para
+                defesa em eventual disputa comercial. Depois disso, eliminamos ou anonimizamos.
               </p>
             </LegalSection>
 
@@ -261,23 +260,14 @@ export default function PrivacyPolicyPage() {
             </LegalSection>
 
             <LegalSection id="exclusao" number={9} title="Como pedir a exclusão dos seus dados">
-              <ol className="list-decimal space-y-2 pl-5 marker:font-semibold marker:text-foreground">
-                <li>
-                  Envie uma mensagem para o contato de privacidade informando o número de telefone do
-                  WhatsApp usado nas conversas e o pedido &ldquo;Excluir meus dados&rdquo;.
-                </li>
-                <li>
-                  Confirmaremos a sua identidade, por exemplo respondendo pelo próprio número de
-                  WhatsApp.
-                </li>
-                <li>
-                  Eliminaremos as conversas, os dados de contato e as informações de qualificação
-                  ligados ao seu número e avisaremos quando terminar, nos prazos da seção anterior.
-                </li>
-              </ol>
               <p>
-                Alguns dados podem ser mantidos pelo tempo que a lei exigir ou para defesa em
-                processos, e nesse caso explicaremos qual e por quê.
+                Você pode pedir a exclusão dos seus dados a qualquer momento, pelo WhatsApp ou por
+                e-mail. O passo a passo completo, com prazo de resposta e o que é excluído, está
+                numa página própria:{" "}
+                <Link href="/exclusao-dados" className={legalLinkClass}>
+                  Exclusão de Dados
+                </Link>
+                .
               </p>
             </LegalSection>
 
