@@ -1,7 +1,14 @@
 import type { Metadata } from "next";
-import Image from "next/image";
-import Link from "next/link";
-import type { ReactNode } from "react";
+import {
+  LegalFooter,
+  LegalHeader,
+  LegalPageHeading,
+  LegalSection,
+  LegalSidebar,
+  LegalSummaryRow,
+  Pendente,
+  legalLinkClass
+} from "@/components/legal/legal-page";
 
 export const metadata: Metadata = {
   title: "Política de Privacidade | DAR+ Serviços | Formação",
@@ -30,56 +37,9 @@ const sections = [
   { id: "contato", title: "Contato e autoridades" }
 ];
 
-/** Marca dado que ainda precisa ser preenchido/confirmado antes da publicação. */
-function Pendente({ children = "a definir" }: { children?: ReactNode }) {
-  return (
-    <span className="whitespace-nowrap rounded border border-primary/40 bg-primary/10 px-1.5 py-0.5 text-[0.85em] font-medium text-foreground">
-      {children}
-    </span>
-  );
-}
-
-function Section({
-  id,
-  number,
-  title,
-  children
-}: {
-  id: string;
-  number: number;
-  title: string;
-  children: ReactNode;
-}) {
-  return (
-    <section id={id} className="scroll-mt-24 border-t py-10 first:border-t-0 first:pt-0">
-      <div className="flex items-baseline gap-4">
-        <span aria-hidden className="font-display text-3xl font-semibold leading-none text-primary">
-          {String(number).padStart(2, "0")}
-        </span>
-        <h2 className="font-display text-2xl font-semibold leading-snug text-foreground">{title}</h2>
-      </div>
-      <div className="mt-5 space-y-4 text-[15px] leading-7 text-foreground [&_ul]:list-disc [&_ul]:space-y-2 [&_ul]:pl-5 [&_ul]:marker:text-primary">
-        {children}
-      </div>
-    </section>
-  );
-}
-
-function SummaryRow({ label, children }: { label: string; children: ReactNode }) {
-  return (
-    <div className="grid border-t first:border-t-0 sm:grid-cols-[13rem_1fr]">
-      <dt className="bg-muted px-4 py-3 text-sm font-semibold text-foreground">{label}</dt>
-      <dd className="px-4 py-3 text-sm leading-6 text-foreground">{children}</dd>
-    </div>
-  );
-}
-
-const linkClass =
-  "font-medium text-foreground underline decoration-primary decoration-2 underline-offset-4 hover:decoration-foreground focus-visible:rounded-sm focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-primary";
-
 function PrivacyEmail() {
   return (
-    <a href={`mailto:${PRIVACY_EMAIL}`} className={linkClass}>
+    <a href={`mailto:${PRIVACY_EMAIL}`} className={legalLinkClass}>
       {PRIVACY_EMAIL}
     </a>
   );
@@ -88,76 +48,43 @@ function PrivacyEmail() {
 export default function PrivacyPolicyPage() {
   return (
     <div className="min-h-screen bg-background">
-      <header className="border-b bg-card print:hidden">
-        <div className="mx-auto flex max-w-6xl items-center justify-between gap-4 px-6 py-4">
-          <Link href="/login" aria-label="DAR+ Serviços | Formação — ir para o acesso à plataforma">
-            <Image
-              src="/brand/logo-fill.png"
-              alt="DAR+ Serviços | Formação"
-              width={168}
-              height={70}
-              priority
-              className="h-auto w-[120px]"
-            />
-          </Link>
-          <Link href="/login" className={`${linkClass} inline-flex min-h-11 items-center text-sm`}>
-            Acesso à plataforma
-          </Link>
-        </div>
-      </header>
+      <LegalHeader />
 
       <main className="mx-auto max-w-6xl px-6 pb-24 pt-14 lg:pt-20">
-        <div className="max-w-3xl">
-          <p className="text-xs font-semibold uppercase tracking-[0.14em] text-foreground">
-            Documento legal
-          </p>
-          <h1 className="mt-3 font-display text-[2.4rem] font-semibold leading-[1.1] text-foreground sm:text-5xl">
-            Política de <em className="italic">Privacidade</em>
-          </h1>
-          <span aria-hidden className="mt-5 block h-[3px] w-12 rounded-full bg-primary" />
-          <p className="mt-6 text-base leading-7 text-foreground">
-            Explicamos aqui, sem rodeios, quais dados pessoais tratamos quando você conversa com a
-            DAR+ Serviços | Formação pelo WhatsApp, por que fazemos isso e como você controla essas
-            informações.
-          </p>
-          <p className="mt-3 text-sm text-foreground/70">
-            Última atualização: {LAST_UPDATE} · Versão 1.0
-          </p>
-        </div>
+        <LegalPageHeading
+          eyebrow="Documento legal"
+          title="Política de"
+          emphasis="Privacidade"
+          lastUpdate={LAST_UPDATE}
+          lead={
+            <>
+              Explicamos aqui, sem rodeios, quais dados pessoais tratamos quando você conversa com a
+              DAR+ Serviços | Formação pelo WhatsApp, por que fazemos isso e como você controla essas
+              informações.
+            </>
+          }
+        />
 
         <dl className="mt-10 max-w-3xl overflow-hidden rounded-lg border bg-card">
-          <SummaryRow label="Responsável pelos dados">Horizon LTDA</SummaryRow>
-          <SummaryRow label="CNPJ">{COMPANY_CNPJ}</SummaryRow>
-          <SummaryRow label="Sede">Rua Bananeiras, 361, Manaíra, João Pessoa/PB, Brasil</SummaryRow>
-          <SummaryRow label="Contato de privacidade">
+          <LegalSummaryRow label="Responsável pelos dados">Horizon LTDA</LegalSummaryRow>
+          <LegalSummaryRow label="CNPJ">{COMPANY_CNPJ}</LegalSummaryRow>
+          <LegalSummaryRow label="Sede">Rua Bananeiras, 361, Manaíra, João Pessoa/PB, Brasil</LegalSummaryRow>
+          <LegalSummaryRow label="Contato de privacidade">
             <PrivacyEmail />
-          </SummaryRow>
-          <SummaryRow label="Encarregado (DPO)">
+          </LegalSummaryRow>
+          <LegalSummaryRow label="Encarregado (DPO)">
             Daniel Lucas, pelo mesmo e-mail de contato
-          </SummaryRow>
-          <SummaryRow label="Leis aplicáveis">
+          </LegalSummaryRow>
+          <LegalSummaryRow label="Leis aplicáveis">
             LGPD (Lei nº 13.709/2018, Brasil) e RGPD (Regulamento (UE) 2016/679, União Europeia)
-          </SummaryRow>
+          </LegalSummaryRow>
         </dl>
 
         <div className="mt-14 grid gap-12 lg:grid-cols-[15rem_minmax(0,1fr)] lg:gap-16">
-          <aside className="print:hidden lg:sticky lg:top-8 lg:max-h-[calc(100vh-4rem)] lg:self-start lg:overflow-y-auto">
-            <details className="rounded-lg border bg-card lg:hidden">
-              <summary className="flex min-h-11 cursor-pointer items-center px-4 text-sm font-semibold text-foreground">
-                Nesta página
-              </summary>
-              <TableOfContents className="border-t px-2 py-2" />
-            </details>
-            <nav aria-label="Nesta página" className="hidden lg:block">
-              <p className="mb-2 text-xs font-semibold uppercase tracking-[0.14em] text-foreground">
-                Nesta página
-              </p>
-              <TableOfContents />
-            </nav>
-          </aside>
+          <LegalSidebar sections={sections} />
 
           <article className="max-w-[44rem]">
-            <Section id="quem-somos" number={1} title="Quem somos e qual é o nosso papel">
+            <LegalSection id="quem-somos" number={1} title="Quem somos e qual é o nosso papel">
               <p>
                 A plataforma da DAR+ Serviços | Formação é operada pela <strong>Horizon LTDA</strong>{" "}
                 (&ldquo;Horizon&rdquo;, &ldquo;nós&rdquo;), agência de soluções web com sede em João
@@ -168,9 +95,9 @@ export default function PrivacyPolicyPage() {
                 Esta política vale para qualquer pessoa que troque mensagens pelo WhatsApp com os
                 números atendidos pela plataforma e para os usuários que acessam o painel interno.
               </p>
-            </Section>
+            </LegalSection>
 
-            <Section id="dados-coletados" number={2} title="Quais dados coletamos">
+            <LegalSection id="dados-coletados" number={2} title="Quais dados coletamos">
               <p>Coletamos apenas o necessário para atender você:</p>
               <ul>
                 <li>
@@ -200,9 +127,9 @@ export default function PrivacyPolicyPage() {
                 Se você os enviar por conta própria, eles serão tratados com o mesmo cuidado, mas
                 pedimos que evite fazê-lo.
               </p>
-            </Section>
+            </LegalSection>
 
-            <Section id="finalidades" number={3} title="Para que usamos os dados">
+            <LegalSection id="finalidades" number={3} title="Para que usamos os dados">
               <ul>
                 <li>
                   <strong>Responder e conduzir o seu atendimento</strong> — execução do serviço ou de
@@ -227,9 +154,9 @@ export default function PrivacyPolicyPage() {
                 </li>
               </ul>
               <p>Não vendemos os seus dados nem os usamos para publicidade de terceiros.</p>
-            </Section>
+            </LegalSection>
 
-            <Section
+            <LegalSection
               id="inteligencia-artificial"
               number={4}
               title="Atendimento com inteligência artificial"
@@ -250,9 +177,9 @@ export default function PrivacyPolicyPage() {
                 sem envio do conteúdo das conversas a um provedor de IA de terceiros.{" "}
                 <Pendente>confirmar antes de publicar</Pendente>
               </p>
-            </Section>
+            </LegalSection>
 
-            <Section id="compartilhamento" number={5} title="Com quem compartilhamos">
+            <LegalSection id="compartilhamento" number={5} title="Com quem compartilhamos">
               <p>
                 Usamos prestadores que tratam dados em nosso nome e sob as nossas instruções
                 (operadores/subcontratantes):
@@ -278,9 +205,9 @@ export default function PrivacyPolicyPage() {
                 quem precisa dele para o atendimento. Também podemos compartilhar dados quando a lei
                 ou uma autoridade competente exigir.
               </p>
-            </Section>
+            </LegalSection>
 
-            <Section
+            <LegalSection
               id="transferencia-internacional"
               number={6}
               title="Transferência internacional"
@@ -294,9 +221,9 @@ export default function PrivacyPolicyPage() {
               <p>
                 Região de armazenamento do banco de dados: <Pendente />
               </p>
-            </Section>
+            </LegalSection>
 
-            <Section id="retencao" number={7} title="Por quanto tempo guardamos">
+            <LegalSection id="retencao" number={7} title="Por quanto tempo guardamos">
               <p>
                 Guardamos os dados enquanto durar o seu atendimento e pelo tempo necessário para
                 cumprir obrigações legais ou exercer direitos em eventual disputa. Depois disso, os
@@ -305,9 +232,9 @@ export default function PrivacyPolicyPage() {
               <p>
                 Prazo de retenção das conversas e dos dados de contato: <Pendente />
               </p>
-            </Section>
+            </LegalSection>
 
-            <Section id="direitos" number={8} title="Seus direitos">
+            <LegalSection id="direitos" number={8} title="Seus direitos">
               <p>Você pode, a qualquer momento e sem custo:</p>
               <ul>
                 <li>saber se tratamos dados seus e ter acesso a eles;</li>
@@ -324,16 +251,16 @@ export default function PrivacyPolicyPage() {
               </ul>
               <p>
                 Para exercer qualquer direito, use o contato indicado na seção{" "}
-                <a href="#contato" className={linkClass}>
+                <a href="#contato" className={legalLinkClass}>
                   Contato e autoridades
                 </a>
                 . Respondemos em até 15 dias, conforme a LGPD (art. 19, II), e no máximo em um mês,
                 conforme o RGPD (art. 12, 3). Podemos pedir informações para confirmar que o pedido
                 vem de você.
               </p>
-            </Section>
+            </LegalSection>
 
-            <Section id="exclusao" number={9} title="Como pedir a exclusão dos seus dados">
+            <LegalSection id="exclusao" number={9} title="Como pedir a exclusão dos seus dados">
               <ol className="list-decimal space-y-2 pl-5 marker:font-semibold marker:text-foreground">
                 <li>
                   Envie uma mensagem para o contato de privacidade informando o número de telefone do
@@ -352,9 +279,9 @@ export default function PrivacyPolicyPage() {
                 Alguns dados podem ser mantidos pelo tempo que a lei exigir ou para defesa em
                 processos, e nesse caso explicaremos qual e por quê.
               </p>
-            </Section>
+            </LegalSection>
 
-            <Section id="seguranca" number={10} title="Segurança">
+            <LegalSection id="seguranca" number={10} title="Segurança">
               <p>
                 Usamos conexões criptografadas (HTTPS), controle de acesso por organização e por
                 função, chaves de acesso guardadas apenas no servidor e registro das operações
@@ -362,32 +289,32 @@ export default function PrivacyPolicyPage() {
                 gerar risco relevante a você, comunicaremos você e a autoridade competente nos termos
                 da lei.
               </p>
-            </Section>
+            </LegalSection>
 
-            <Section id="cookies" number={11} title="Cookies">
+            <LegalSection id="cookies" number={11} title="Cookies">
               <p>
                 Esta página não usa cookies de publicidade nem de análise de comportamento. O painel
                 interno usa apenas cookies estritamente necessários para manter o login da equipe.
               </p>
-            </Section>
+            </LegalSection>
 
-            <Section id="menores" number={12} title="Crianças e adolescentes">
+            <LegalSection id="menores" number={12} title="Crianças e adolescentes">
               <p>
                 Nossos serviços não são direcionados a menores de 18 anos. Se você acredita que uma
                 criança ou adolescente nos enviou dados sem autorização de quem responde por ele,
                 fale com a gente para que possamos eliminá-los.
               </p>
-            </Section>
+            </LegalSection>
 
-            <Section id="alteracoes" number={13} title="Alterações desta política">
+            <LegalSection id="alteracoes" number={13} title="Alterações desta política">
               <p>
                 Podemos atualizar esta política para refletir mudanças na lei ou no serviço. A data
                 da última revisão fica no topo desta página, e mudanças relevantes serão comunicadas
                 por um canal adequado.
               </p>
-            </Section>
+            </LegalSection>
 
-            <Section id="contato" number={14} title="Contato e autoridades">
+            <LegalSection id="contato" number={14} title="Contato e autoridades">
               <p>
                 Dúvidas, pedidos e reclamações sobre privacidade: <PrivacyEmail />.
               </p>
@@ -396,37 +323,12 @@ export default function PrivacyPolicyPage() {
                 <strong>Autoridade Nacional de Proteção de Dados (ANPD)</strong>; em Portugal, a{" "}
                 <strong>Comissão Nacional de Proteção de Dados (CNPD)</strong>.
               </p>
-            </Section>
+            </LegalSection>
           </article>
         </div>
       </main>
 
-      <footer className="border-t bg-card">
-        <div className="mx-auto flex max-w-6xl flex-col gap-2 px-6 py-6 text-sm text-foreground/70 sm:flex-row sm:justify-between">
-          <span>Horizon LTDA · Política de Privacidade · Versão 1.0</span>
-          <span>Atualizada em {LAST_UPDATE}</span>
-        </div>
-      </footer>
+      <LegalFooter docName="Política de Privacidade" lastUpdate={LAST_UPDATE} />
     </div>
-  );
-}
-
-function TableOfContents({ className = "" }: { className?: string }) {
-  return (
-    <ol className={className}>
-      {sections.map((section, index) => (
-        <li key={section.id}>
-          <a
-            href={`#${section.id}`}
-            className="flex min-h-11 items-center gap-3 rounded-md px-2 text-sm leading-5 text-foreground hover:bg-muted focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
-          >
-            <span aria-hidden className="w-5 shrink-0 font-display text-foreground/60">
-              {String(index + 1).padStart(2, "0")}
-            </span>
-            {section.title}
-          </a>
-        </li>
-      ))}
-    </ol>
   );
 }
