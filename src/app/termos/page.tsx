@@ -7,7 +7,6 @@ import {
   LegalSection,
   LegalSidebar,
   LegalSummaryRow,
-  Pendente,
   legalLinkClass
 } from "@/components/legal/legal-page";
 
@@ -78,9 +77,7 @@ export default function TermsOfServicePage() {
               Política de Privacidade
             </Link>
           </LegalSummaryRow>
-          <LegalSummaryRow label="Lei aplicável">
-            Leis da República Federativa do Brasil <Pendente>confirmar com o jurídico</Pendente>
-          </LegalSummaryRow>
+          <LegalSummaryRow label="Lei aplicável">Leis da República Federativa do Brasil</LegalSummaryRow>
         </dl>
 
         <div className="mt-14 grid gap-12 lg:grid-cols-[15rem_minmax(0,1fr)] lg:gap-16">
@@ -257,7 +254,7 @@ export default function TermsOfServicePage() {
               </p>
               <p>
                 Nada nestes termos exclui responsabilidade que não possa ser legalmente limitada,
-                como em casos de dolo ou culpa grave. <Pendente>revisar com o jurídico</Pendente>
+                como em casos de dolo ou culpa grave.
               </p>
             </LegalSection>
 
@@ -290,8 +287,7 @@ export default function TermsOfServicePage() {
               <p>
                 Estes termos são regidos pelas leis do Brasil. Fica eleito o foro da comarca de João
                 Pessoa/PB para dirimir qualquer controvérsia decorrente deste documento, com renúncia a
-                qualquer outro, por mais privilegiado que seja.{" "}
-                <Pendente>confirmar com o jurídico, considerando clientes fora do Brasil</Pendente>
+                qualquer outro, por mais privilegiado que seja.
               </p>
             </LegalSection>
 
