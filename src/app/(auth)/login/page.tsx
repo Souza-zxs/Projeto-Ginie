@@ -54,20 +54,21 @@ export default async function LoginPage({
           <LoginForm redirectTo={params.redirectTo} />
         </div>
 
-        {/* sm:whitespace-nowrap: numa tela bem estreita (<640px) deixa quebrar normalmente,
-            para não empurrar a frase para fora da tela com scroll horizontal. */}
-        <p className="mt-6 text-center text-sm text-foreground/70 sm:whitespace-nowrap">
+        {/* whitespace-nowrap por link (não na frase toda): a frase inteira não cabe numa
+            linha só dentro da largura do card sem vazar por fora dele. Isso mantém o bloco
+            de texto contido e centralizado com o card, só evitando quebrar no meio de um link. */}
+        <p className="mt-6 text-center text-sm text-foreground/70">
           Ao entrar, você concorda com os{" "}
           <Link
             href="/termos"
-            className="font-medium text-foreground underline decoration-primary decoration-2 underline-offset-4 hover:decoration-foreground focus-visible:rounded-sm focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-primary"
+            className="whitespace-nowrap font-medium text-foreground underline decoration-primary decoration-2 underline-offset-4 hover:decoration-foreground focus-visible:rounded-sm focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-primary"
           >
             Termos de Uso
           </Link>{" "}
           e com a{" "}
           <Link
             href="/privacidade"
-            className="font-medium text-foreground underline decoration-primary decoration-2 underline-offset-4 hover:decoration-foreground focus-visible:rounded-sm focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-primary"
+            className="whitespace-nowrap font-medium text-foreground underline decoration-primary decoration-2 underline-offset-4 hover:decoration-foreground focus-visible:rounded-sm focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-primary"
           >
             Política de Privacidade
           </Link>
