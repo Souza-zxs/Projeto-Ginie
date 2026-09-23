@@ -20,6 +20,7 @@ import { cn } from "@/lib/utils";
 import { getCurrentProfile } from "@/lib/auth/organization";
 import { createClient } from "@/lib/supabase/server";
 import { AgentTester } from "./agent-tester";
+import { AutoRefresh } from "@/components/auto-refresh";
 import {
   qualifyManuallyAction,
   sendManualReplyAction,
@@ -191,7 +192,11 @@ export default async function InboxPage({
 
   return (
     <>
-      <PageHeader title="Inbox" description="Atendimento em tempo real das conversas de WhatsApp." />
+      <PageHeader
+        title="Inbox"
+        description="Conversas de WhatsApp. A página atualiza sozinha a cada 5 segundos."
+      />
+      <AutoRefresh intervalMs={5_000} />
 
       <section className="mb-5 grid gap-3 md:grid-cols-5">
         <Metric icon={<MessageCircle className="h-4 w-4" />} label="Abertas" value={String(openCount)} />
