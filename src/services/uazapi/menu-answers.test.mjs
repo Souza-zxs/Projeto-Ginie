@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { detectMenuProgress, detectMenuTopic, extractMenuAnswers } from "./menu-answers.ts";
+import { MENU_CHOICE_ROWS } from "./menu-bot.ts";
+import { detectMenuProgress, detectMenuTopic, displayAnswer, extractMenuAnswers } from "./menu-answers.ts";
 
 const bot = (step, content = "pergunta") => ({ direction: "outbound", content, menu_step: step });
 const client = (content) => ({ direction: "inbound", content, menu_step: null });
@@ -63,4 +64,40 @@ test("progresso: em andamento, encaminhado ou sem menu", () => {
   assert.equal(detectMenuProgress(supportFlow), "handed_off");
   assert.equal(detectMenuProgress(supportFlow.slice(0, 6)), "in_progress");
   assert.equal(detectMenuProgress([client("oi"), { direction: "outbound", content: "x", menu_step: null }]), "no_menu");
+});
+
+test("códigos de lista viram rótulos (respostas antigas gravadas como u2, h5...)", () => {
+  const messages = [
+    bot("awaiting_1_urgency"), client("u2"),
+    bot("awaiting_1_type"), client("h5"),
+    bot("awaiting_1"), client("w1"),
+    bot("menu"), client("2")
+  ];
+
+  assert.deepEqual(extractMenuAnswers(messages), [
+    { question: "Urgência", answer: "Próximas semanas" },
+    { question: "Tipo de apoio", answer: "Apoio doméstico" },
+    { question: "Apoio para quem", answer: "Para mim" },
+    { question: "Opção do menu", answer: "Formação" }
+  ]);
+});
+
+test("texto livre não é alterado", () => {
+  assert.equal(displayAnswer("Localidade", "Lisboa"), "Lisboa");
+  assert.equal(displayAnswer("Curso", "pode enviar"), "pode enviar");
+  assert.equal(displayAnswer("Localidade", "h5 fica em Faro"), "h5 fica em Faro");
+});
+
+test("o mapa de rótulos cobre todas as linhas das listas do bot", () => {
+  for (const row of MENU_CHOICE_ROWS) {
+    const [label, id] = row.split("|");
+    const question = /^[1-4]$/.test(id) ? "Opção do menu" : "Outra";
+
+    if (/^[1-4]$/.test(id)) {
+      // Menu principal: o rótulo da lista pode ser mais curto, mas tem de existir uma tradução.
+      assert.notEqual(displayAnswer(question, id), id, row);
+    } else {
+      assert.equal(displayAnswer(question, id), label, row);
+    }
+  }
 });

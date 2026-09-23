@@ -34,6 +34,53 @@ const QUESTION_BY_STEP: Record<string, string> = {
   awaiting_3_details_retry: "Nome e zona"
 };
 
+// Respostas antigas foram gravadas com o código do item da lista (ex.: "u2") em vez do rótulo.
+// Este mapa traduz na hora de mostrar. menu-answers.test.mjs confere que não fica defasado
+// em relação às listas do menu-bot.
+const CHOICE_LABELS: Record<string, string> = {
+  w1: "Para mim",
+  w2: "Pai ou mãe",
+  w3: "Outro familiar",
+  w4: "Amigo ou conhecido",
+  h1: "Higiene pessoal",
+  h2: "Refeições",
+  h3: "Companhia",
+  h4: "Medicação",
+  h5: "Apoio doméstico",
+  h6: "Vários serviços",
+  u1: "O quanto antes",
+  u2: "Próximas semanas",
+  u3: "Só a informar-me",
+  c1: "Técnico de Geriatria",
+  c2: "Animação Sociocultural",
+  c3: "Gestão de ERPI, CD e SAD",
+  c4: "Prevenção do Burnout",
+  c5: "Módulos avulsos",
+  e1: "Tenho experiência",
+  e2: "Tenho formação",
+  e3: "Experiência e formação",
+  e4: "Ainda sem experiência",
+  other: "Outro"
+};
+
+const MENU_OPTION_LABELS: Record<string, string> = {
+  "1": "Apoio domiciliário",
+  "2": "Formação",
+  "3": "Candidatura",
+  "4": "Outro assunto"
+};
+
+/** Texto legível de uma resposta: troca códigos de lista e números do menu pelos rótulos. */
+export function displayAnswer(question: string, answer: string) {
+  const key = answer.trim();
+
+  if (question === "Opção do menu" && MENU_OPTION_LABELS[key]) {
+    return MENU_OPTION_LABELS[key];
+  }
+
+  return CHOICE_LABELS[key] ?? answer;
+}
+
 /** Respostas do cliente, em ordem, com a pergunta a que cada uma responde. */
 export function extractMenuAnswers(messages: MenuHistoryMessage[]): MenuAnswer[] {
   const answers: MenuAnswer[] = [];
@@ -53,7 +100,7 @@ export function extractMenuAnswers(messages: MenuHistoryMessage[]): MenuAnswer[]
     const text = (message.content ?? "").trim();
 
     if (question && text) {
-      answers.push({ question, answer: text });
+      answers.push({ question, answer: displayAnswer(question, text) });
     } else if (pendingStep === "done" && text) {
       answers.push({ question: "Depois do encaminhamento", answer: text });
     }

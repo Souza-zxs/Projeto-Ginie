@@ -166,6 +166,16 @@ export const OPTION_REPLIES: Record<1 | 2 | 3, string> = {
 
 const OPTION_LISTS: Record<1 | 2 | 3, MenuList> = { 1: WHO_LIST, 2: COURSE_LIST, 3: EXPERIENCE_LIST };
 
+/** Todas as linhas ("rótulo|id|descrição") das listas, para conferir o mapa de rótulos das respostas. */
+export const MENU_CHOICE_ROWS = [
+  ...MENU_LIST_CHOICES,
+  ...WHO_LIST.choices,
+  ...HELP_LIST.choices,
+  ...URGENCY_LIST.choices,
+  ...COURSE_LIST.choices,
+  ...EXPERIENCE_LIST.choices
+];
+
 export const HANDOFF_DAY = "Obrigada! Já passámos o seu pedido a um membro da nossa equipa, que dará seguimento assim que possível.";
 export const HANDOFF_NIGHT = "Recebemos o seu contacto. Será contactado por um membro da nossa equipa logo que possível.";
 

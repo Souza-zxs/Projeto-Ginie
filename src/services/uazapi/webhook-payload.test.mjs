@@ -55,6 +55,23 @@ test("toque numa lista traz o choiceId; sem texto, usa o id como texto", () => {
   assert.equal(withoutText.text, "3");
 });
 
+test("resposta de lista usa o título tocado como texto", () => {
+  const parsed = parseUazapiWebhook({
+    ...docExample,
+    message: {
+      ...docExample.message,
+      text: "",
+      buttonOrListid: "u2",
+      messageType: "ListResponseMessage",
+      content: { title: "Próximas semanas", listType: 1 }
+    }
+  });
+
+  assert.equal(parsed.kind, "message");
+  assert.equal(parsed.text, "Próximas semanas");
+  assert.equal(parsed.choiceId, "u2");
+});
+
 test("número de Portugal", () => {
   const parsed = parseUazapiWebhook(withMessage({ chatid: "351912345678@s.whatsapp.net" }));
 

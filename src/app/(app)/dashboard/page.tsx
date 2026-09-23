@@ -12,9 +12,7 @@ import {
 import { PageHeader } from "@/components/page-header";
 import { StatCard } from "@/components/stat-card";
 import { getCurrentProfile } from "@/lib/auth/organization";
-import { withTimeout } from "@/lib/async/with-timeout";
 import { createClient } from "@/lib/supabase/server";
-import { getMetaPhoneStatus, getMetaTemplates } from "@/services/meta/account";
 
 type MetricTable =
   | "messages"
@@ -53,9 +51,7 @@ export default async function DashboardPage() {
     redistributedLeads,
     pendingJobs,
     activeAgents,
-    activeBrokers,
-    metaPhone,
-    metaTemplates
+    activeBrokers
   ] = await Promise.all([
     countRows(supabase, "messages", profile.organization_id, {
       column: "direction",
@@ -93,14 +89,6 @@ export default async function DashboardPage() {
     countRows(supabase, "brokers", profile.organization_id, {
       column: "active",
       value: true
-    }),
-    withTimeout(getMetaPhoneStatus(), 1500, {
-      data: null,
-      error: "Consulta Meta demorou demais. Atualize a pagina para tentar novamente."
-    }),
-    withTimeout(getMetaTemplates(), 1500, {
-      data: [],
-      error: "Consulta de templates demorou demais."
     })
   ]);
 
@@ -137,34 +125,13 @@ export default async function DashboardPage() {
           <StatCard key={stat.label} {...stat} />
         ))}
       </section>
-      <section className="mt-10 grid gap-6 lg:grid-cols-2">
-        <div className="rounded-xl border bg-card p-6 shadow-sm">
-          <h2 className="font-display text-lg text-slate-950">Meta WhatsApp</h2>
-          <div className="mt-4 space-y-2 text-sm text-muted-foreground">
-            {metaPhone.data ? (
-              <>
-                <p className="font-medium text-slate-800">
-                  {metaPhone.data.displayPhoneNumber || "Numero conectado"}
-                </p>
-                <p>{metaPhone.data.verifiedName || "Nome verificado nao retornado"}</p>
-                <p>Qualidade: {metaPhone.data.qualityRating || "nao informada"}</p>
-              </>
-            ) : (
-              <p className="text-red-700">{metaPhone.error}</p>
-            )}
-            <p>
-              Templates aprovados:{" "}
-              {metaTemplates.data.filter((template) => template.status === "APPROVED").length}
-            </p>
-          </div>
-        </div>
+      <section className="mt-10 grid gap-6">
         <div className="rounded-xl border bg-card p-6 shadow-sm">
           <h2 className="font-display text-lg text-slate-950">Operacao</h2>
           <div className="mt-4 grid gap-3 text-sm text-muted-foreground">
             <HealthRow label="Fila de tarefas" ok={pendingJobs < 100} value={`${pendingJobs} pendente(s)`} />
             <HealthRow label="Agentes IA" ok={activeAgents > 0} value={`${activeAgents} ativo(s)`} />
             <HealthRow label="Equipe" ok={activeBrokers > 0} value={`${activeBrokers} ativo(s)`} />
-            <HealthRow label="Templates Meta" ok={metaTemplates.data.some((template) => template.status === "APPROVED")} value={`${metaTemplates.data.length} retornado(s)`} />
           </div>
         </div>
       </section>

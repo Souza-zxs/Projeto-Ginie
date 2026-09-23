@@ -22,6 +22,8 @@ export type UazapiMessage = {
   messageType?: string;
   /** ID do item tocado numa lista/botão interativo (ex.: "2"). */
   buttonOrListid?: string;
+  /** Em resposta de lista, traz o `title` (rótulo) do item tocado; em texto comum é string. */
+  content?: unknown;
   hauzapp_cliente_id?: string;
   clienteID?: string;
   clienteId?: string;
@@ -156,7 +158,10 @@ export function parseUazapiWebhook(payload: UazapiWebhookPayload): ParsedUazapiW
 
   const legacyText = typeof payload.message === "string" ? payload.message : "";
   const choiceId = typeof message?.buttonOrListid === "string" && message.buttonOrListid.trim() ? message.buttonOrListid.trim() : null;
-  const text = (message?.text ?? payload.text ?? legacyText ?? "").trim() || (choiceId ?? "");
+  const contentObject = message?.content && typeof message.content === "object" ? (message.content as { title?: unknown }) : null;
+  const choiceTitle = choiceId && typeof contentObject?.title === "string" ? contentObject.title.trim() : "";
+  // Em resposta de lista o texto vem vazio: o rótulo tocado (ou, sem ele, o id) faz de texto.
+  const text = (message?.text ?? payload.text ?? legacyText ?? "").trim() || choiceTitle || (choiceId ?? "");
 
   if (!text) {
     return { kind: "ignored", reason: "empty_text" };
