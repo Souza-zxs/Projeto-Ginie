@@ -28,7 +28,7 @@ export type UazapiInstanceRef = {
   name?: string | null;
 };
 
-type UazapiIntegrationRow = { organization_id: string; config: IntegrationConfig | null };
+type UazapiIntegrationRow = { id: string; organization_id: string; config: IntegrationConfig | null };
 
 function matchUazapiRow<T extends { config: IntegrationConfig | null }>(rows: T[], instance?: UazapiInstanceRef) {
   if (instance?.token) {
@@ -52,14 +52,14 @@ function matchUazapiRow<T extends { config: IntegrationConfig | null }>(rows: T[
  * Uazapi ativa mais recente — o que mantém organizações com um número só
  * funcionando sem configurar nada.
  */
-export async function getUazapiIntegrationConfig(
+export async function getUazapiIntegrationRow(
   supabase: SupabaseClient,
   organizationId: string,
   instance?: UazapiInstanceRef
-) {
+): Promise<UazapiIntegrationRow | null> {
   const { data } = await supabase
     .from("integrations")
-    .select("organization_id, config")
+    .select("id, organization_id, config")
     .eq("organization_id", organizationId)
     .eq("provider", "uazapi")
     .eq("active", true)
@@ -68,7 +68,28 @@ export async function getUazapiIntegrationConfig(
 
   const rows = data ?? [];
 
-  return (matchUazapiRow(rows, instance) ?? rows[0])?.config ?? {};
+  return matchUazapiRow(rows, instance) ?? rows[0] ?? null;
+}
+
+export async function getUazapiIntegrationConfig(
+  supabase: SupabaseClient,
+  organizationId: string,
+  instance?: UazapiInstanceRef
+) {
+  return (await getUazapiIntegrationRow(supabase, organizationId, instance))?.config ?? {};
+}
+
+/** Config de uma integração Uazapi específica, pelo id salvo na conversa. */
+export async function getIntegrationConfigById(supabase: SupabaseClient, organizationId: string, integrationId: string) {
+  const { data } = await supabase
+    .from("integrations")
+    .select("config")
+    .eq("id", integrationId)
+    .eq("organization_id", organizationId)
+    .eq("active", true)
+    .maybeSingle<{ config: IntegrationConfig | null }>();
+
+  return data?.config ?? null;
 }
 
 /**
@@ -84,7 +105,7 @@ export async function findUazapiOrganizationByToken(supabase: SupabaseClient, to
 
   const { data } = await supabase
     .from("integrations")
-    .select("organization_id, config")
+    .select("id, organization_id, config")
     .eq("provider", "uazapi")
     .eq("active", true)
     .returns<UazapiIntegrationRow[]>();

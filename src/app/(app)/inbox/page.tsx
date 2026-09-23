@@ -21,9 +21,9 @@ import { getCurrentProfile } from "@/lib/auth/organization";
 import { createClient } from "@/lib/supabase/server";
 import { AgentTester } from "./agent-tester";
 import { AutoRefresh } from "@/components/auto-refresh";
+import { ManualReplyForm } from "./manual-reply-form";
 import {
   qualifyManuallyAction,
-  sendManualReplyAction,
   sendToBrokerAction,
   toggleAiAction
 } from "./actions";
@@ -290,23 +290,7 @@ export default async function InboxPage({
                 )}
               </div>
 
-              <form action={sendManualReplyAction} className="border-t bg-white p-4">
-                <input type="hidden" name="conversation_id" value={activeConversation.id} />
-                <div className="flex gap-3">
-                  <input
-                    name="content"
-                    placeholder="Responder manualmente..."
-                    className="h-11 flex-1 rounded-md border bg-white px-3 text-sm outline-none transition focus:border-teal-600 focus:ring-4 focus:ring-teal-600/10"
-                  />
-                  <button
-                    type="submit"
-                    className="inline-flex h-11 items-center gap-2 rounded-md bg-primary px-4 text-sm font-semibold text-primary-foreground"
-                  >
-                    <Send className="h-4 w-4" />
-                    Enviar
-                  </button>
-                </div>
-              </form>
+              <ManualReplyForm conversationId={activeConversation.id} />
             </>
           ) : (
             <div className="flex flex-1 items-center justify-center p-8 text-sm text-muted-foreground">

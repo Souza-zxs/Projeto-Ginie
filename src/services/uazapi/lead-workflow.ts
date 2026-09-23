@@ -5,6 +5,7 @@ import {
   configString,
   getActiveIntegrationConfig,
   getUazapiIntegrationConfig,
+  getUazapiIntegrationRow,
   type UazapiInstanceRef
 } from "@/services/integrations/config";
 import { getKnownLeadFacts, upsertLeadFromQualification } from "@/services/leads/workflow";
@@ -59,6 +60,19 @@ export async function processUazapiLeadMessage({
     senderName,
     hauzappClienteId
   });
+
+  // Marca por qual linha esta conversa está a falar agora: a resposta manual pelo Inbox
+  // usa isto para responder pela mesma linha, em vez de adivinhar. Atualiza a cada
+  // mensagem — se o lead trocar de linha, a marcação acompanha. É "best-effort": se a
+  // migration da coluna ainda não foi aplicada, o erro é ignorado e o atendimento segue.
+  const integrationRow = await getUazapiIntegrationRow(supabase, organizationId, instance);
+
+  if (integrationRow) {
+    await supabase
+      .from("conversations")
+      .update({ uazapi_integration_id: integrationRow.id })
+      .eq("id", conversation.id);
+  }
 
   await supabase.from("messages").insert({
     organization_id: organizationId,

@@ -4,7 +4,11 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { getCurrentProfile } from "@/lib/auth/organization";
 import { scheduleLeadFollowups } from "@/services/followups/lead-followups";
-import { configString, getActiveIntegrationConfig } from "@/services/integrations/config";
+import {
+  configString,
+  getActiveIntegrationConfig,
+  getIntegrationConfigById
+} from "@/services/integrations/config";
 import { enqueueHauzappQualifiedLead } from "@/services/leads/workflow";
 import { sendMetaMessage } from "@/services/meta/send-message";
 import { sendUazapiMessage } from "@/services/uazapi/send-message";
@@ -26,88 +30,134 @@ type ConversationForReply = {
   } | null;
 };
 
-export async function sendManualReplyAction(formData: FormData) {
+/** null = ainda não enviou; { error } = falhou de forma legível; { ok } = enviada. */
+export type ManualReplyState = { ok: true } | { error: string } | null;
+
+/**
+ * Nunca lança: qualquer falha no envio (Uazapi desconectada, token errado, Meta fora do
+ * ar) volta como mensagem na própria tela. Antes, uma exceção aqui derrubava a página
+ * inteira com "server error" e a equipa nem via o motivo.
+ */
+export async function sendManualReplyAction(
+  _previous: ManualReplyState,
+  formData: FormData
+): Promise<ManualReplyState> {
   const parsed = replySchema.safeParse({
     conversation_id: formData.get("conversation_id"),
     content: formData.get("content")
   });
 
   if (!parsed.success) {
-    return;
+    return { error: "Escreva uma mensagem (até 4000 caracteres)." };
   }
 
-  const supabase = await createClient();
-  const { profile } = await getCurrentProfile(supabase);
+  try {
+    const supabase = await createClient();
+    const { profile } = await getCurrentProfile(supabase);
 
-  if (!profile) {
-    return;
+    if (!profile) {
+      return { error: "Sessão expirada. Entre novamente." };
+    }
+
+    const { data: conversation } = await supabase
+      .from("conversations")
+      .select("id, organization_id, contact_id, channel, contacts(id, phone)")
+      .eq("id", parsed.data.conversation_id)
+      .eq("organization_id", profile.organization_id)
+      .single<ConversationForReply>();
+
+    if (!conversation?.contacts) {
+      return { error: "Conversa não encontrada." };
+    }
+
+    const isUazapi = conversation.channel === "uazapi";
+    const result = isUazapi
+      ? await sendUazapiManualReply({
+          supabase,
+          organizationId: profile.organization_id,
+          conversationId: conversation.id,
+          phone: conversation.contacts.phone,
+          text: parsed.data.content
+        })
+      : await sendMetaMessage({
+          phone: conversation.contacts.phone,
+          text: parsed.data.content
+        });
+
+    const now = new Date().toISOString();
+
+    await Promise.all([
+      supabase.from("messages").insert({
+        organization_id: profile.organization_id,
+        conversation_id: conversation.id,
+        contact_id: conversation.contacts.id,
+        direction: "outbound",
+        channel: isUazapi ? "uazapi" : "meta",
+        type: "text",
+        content: parsed.data.content,
+        status: "sent",
+        external_message_id: result.externalMessageId,
+        payload: result.payload
+      }),
+      supabase.from("conversations").update({ last_message_at: now }).eq("id", conversation.id)
+    ]);
+
+    await scheduleLeadFollowups({
+      supabase,
+      organizationId: profile.organization_id,
+      conversationId: conversation.id,
+      contactId: conversation.contacts.id,
+      scheduledAfter: now
+    });
+
+    revalidatePath("/inbox");
+
+    return { ok: true };
+  } catch (error) {
+    return { error: describeSendError(error) };
+  }
+}
+
+function describeSendError(error: unknown) {
+  const message = error instanceof Error ? error.message : "";
+
+  if (/credentials are missing/i.test(message)) {
+    return "Falta a URL ou o token da Uazapi nesta conexão. Confira em Configurações > Integrações.";
   }
 
-  const { data: conversation } = await supabase
-    .from("conversations")
-    .select("id, organization_id, contact_id, channel, contacts(id, phone)")
-    .eq("id", parsed.data.conversation_id)
-    .eq("organization_id", profile.organization_id)
-    .single<ConversationForReply>();
-
-  if (!conversation?.contacts) {
-    return;
+  if (/uazapi/i.test(message)) {
+    return `A Uazapi recusou o envio (${message}). Confira se o número está conectado em Configurações > Integrações.`;
   }
 
-  const isUazapi = conversation.channel === "uazapi";
-  const result = isUazapi
-    ? await sendUazapiManualReply({
-        supabase,
-        organizationId: profile.organization_id,
-        phone: conversation.contacts.phone,
-        text: parsed.data.content
-      })
-    : await sendMetaMessage({
-        phone: conversation.contacts.phone,
-        text: parsed.data.content
-      });
-
-  const now = new Date().toISOString();
-
-  await Promise.all([
-    supabase.from("messages").insert({
-      organization_id: profile.organization_id,
-      conversation_id: conversation.id,
-      contact_id: conversation.contacts.id,
-      direction: "outbound",
-      channel: isUazapi ? "uazapi" : "meta",
-      type: "text",
-      content: parsed.data.content,
-      status: "sent",
-      external_message_id: result.externalMessageId,
-      payload: result.payload
-    }),
-    supabase.from("conversations").update({ last_message_at: now }).eq("id", conversation.id)
-  ]);
-
-  await scheduleLeadFollowups({
-    supabase,
-    organizationId: profile.organization_id,
-    conversationId: conversation.id,
-    contactId: conversation.contacts.id,
-    scheduledAfter: now
-  });
-
-  revalidatePath("/inbox");
+  return message ? `Não foi possível enviar: ${message}` : "Não foi possível enviar a mensagem.";
 }
 
 async function sendUazapiManualReply({
   supabase,
   organizationId,
+  conversationId,
   phone,
   text
 }: {
   supabase: Awaited<ReturnType<typeof createClient>>;
   organizationId: string;
+  conversationId: string;
   phone: string;
   text: string;
 }) {
-  const config = await getActiveIntegrationConfig(supabase, organizationId, "uazapi");
+  // Responde pela mesma linha em que a conversa está (marcada pelo webhook). Se a coluna
+  // ainda não existe (migration pendente) ou a conversa é antiga, a leitura falha ou
+  // devolve null, e cai no comportamento anterior: a integração Uazapi ativa mais recente.
+  const { data: linked } = await supabase
+    .from("conversations")
+    .select("uazapi_integration_id")
+    .eq("id", conversationId)
+    .maybeSingle<{ uazapi_integration_id: string | null }>();
+
+  const linkedConfig = linked?.uazapi_integration_id
+    ? await getIntegrationConfigById(supabase, organizationId, linked.uazapi_integration_id)
+    : null;
+  const config = linkedConfig ?? (await getActiveIntegrationConfig(supabase, organizationId, "uazapi"));
   const payload = await sendUazapiMessage({
     phone,
     text,
