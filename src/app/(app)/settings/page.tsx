@@ -18,7 +18,7 @@ const settingsLinks: Array<{
   {
     href: "/settings/integrations" as Route,
     title: "Integrações",
-    description: "Conectar HauzApp, Uazapi e configurar o webhook.",
+    description: "Conectar os números de WhatsApp (Uazapi).",
     icon: Plug
   },
   {

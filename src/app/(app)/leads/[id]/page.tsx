@@ -150,19 +150,6 @@ export default async function LeadDetailPage({
           <Info title="Regiao" value={lead.region} />
           <Info title="Orcamento" value={lead.budget ? `R$ ${lead.budget}` : null} />
           <Info title="Pagamento" value={lead.payment_method} />
-          <Info title="HauzApp Cliente ID" value={lead.hauzapp_cliente_id || "Pendente"} />
-          <Info title="HauzApp Etapa" value={lead.hauzapp_stage_id ?? "Pendente"} />
-          <Info
-            title="Enviado ao HauzApp"
-            value={
-              lead.hauzapp_sent_at
-                ? new Intl.DateTimeFormat("pt-BR", {
-                    dateStyle: "short",
-                    timeStyle: "short"
-                  }).format(new Date(lead.hauzapp_sent_at))
-                : "Pendente"
-            }
-          />
           <section className="rounded-lg border bg-card p-5 shadow-sm">
             <h2 className="text-sm font-semibold text-slate-950">Acoes</h2>
             <form action={updateLeadStageAction} className="mt-4 space-y-3">

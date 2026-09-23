@@ -7,8 +7,6 @@ import { getCurrentProfile } from "@/lib/auth/organization";
 import { createClient } from "@/lib/supabase/server";
 import {
   deleteUazapiIntegrationAction,
-  enqueueHauzappProspectionSyncAction,
-  saveHauzappIntegrationAction,
   saveUazapiIntegrationAction,
   toggleUazapiIntegrationAction
 } from "./actions";
@@ -50,7 +48,6 @@ export default async function IntegrationsPage() {
           .returns<AgentRow[]>()
       ])
     : [{ data: [] }, { data: [] }];
-  const hauzapp = getLatestIntegration(integrations ?? [], "hauzapp");
   const uazapiConnections = (integrations ?? []).filter((integration) => integration.provider === "uazapi");
   const leadAgents = (agents ?? []).filter((agent) => agent.agent_type === "lead_meta");
   const agentNameById = new Map((agents ?? []).map((agent) => [agent.id, agent.name]));
@@ -62,44 +59,10 @@ export default async function IntegrationsPage() {
     <>
       <PageHeader
         title="Integrações"
-        description="Conecte HauzApp e Uazapi sem mexer em JSON ou variáveis técnicas."
+        description="Conecte os números de WhatsApp sem mexer em JSON ou variáveis técnicas."
       />
 
-      <section className="grid gap-6 xl:grid-cols-2">
-        <form action={saveHauzappIntegrationAction} className="space-y-5 rounded-lg border bg-card p-6 shadow-sm">
-          <IntegrationTitle
-            title="Conexão HauzApp"
-            description="Chave da API e sincronização dos negócios do CRM."
-            active={Boolean(hauzapp?.active)}
-          />
-
-          <Field
-            name="apiKey"
-            label="Chave de integração HauzApp"
-            type="password"
-            required={false}
-            placeholder={hauzapp?.config?.apiKey ? "Chave salva. Preencha apenas para trocar." : "Cole a chave HauzApp"}
-          />
-
-          <input type="hidden" name="prospectionStageId" value={String(configNumber(hauzapp?.config, "prospectionStageId", 0))} />
-          <input type="hidden" name="contactStageId" value={String(configNumber(hauzapp?.config, "contactStageId", 2))} />
-          <input type="hidden" name="qualifiedStageId" value={String(configNumber(hauzapp?.config, "qualifiedStageId", 3))} />
-          <input type="hidden" name="leadAgentId" value={configString(hauzapp?.config, "leadAgentId")} />
-          <input type="hidden" name="autoAttendLeadNovo" value={configBoolean(hauzapp?.config, "autoAttendLeadNovo", true) ? "on" : ""} />
-          <input type="hidden" name="autoGreetProspects" value={configBoolean(hauzapp?.config, "autoGreetProspects", false) ? "on" : ""} />
-
-          <div className="rounded-md border bg-slate-50 p-4 text-sm text-muted-foreground">
-            Funil, agente e follow-ups do inbound ficam no assistente de campanha.
-            <Link href={"/campaigns/new" as Route} className="ml-2 font-semibold text-teal-700">
-              Criar campanha inbound
-            </Link>
-          </div>
-
-          <button className="h-10 w-full rounded-md bg-primary text-sm font-semibold text-primary-foreground">
-            Salvar HauzApp
-          </button>
-        </form>
-
+      <section className="max-w-3xl">
         <div className="space-y-5 rounded-lg border bg-card p-6 shadow-sm">
           <IntegrationTitle
             title="Uazapi WhatsApp"
@@ -211,22 +174,6 @@ export default async function IntegrationsPage() {
             <AgentSelect agents={leadAgents} name="leadAgentId" label="Agente que responde por essa linha" />
             <button className="h-10 w-full rounded-md bg-primary text-sm font-semibold text-primary-foreground">
               Salvar conexão
-            </button>
-          </form>
-        </div>
-      </section>
-
-      <section className="mt-6 rounded-lg border bg-card p-5 shadow-sm">
-        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-          <div>
-            <h2 className="text-base font-semibold text-slate-950">Sincronização de Prospecção</h2>
-            <p className="mt-1 text-sm text-muted-foreground">
-              Importa negócios em Lead Novo do HauzApp para o CRM e prepara atendimento por IA.
-            </p>
-          </div>
-          <form action={enqueueHauzappProspectionSyncAction}>
-            <button className="h-10 rounded-md border bg-white px-4 text-sm font-semibold">
-              Sincronizar agora
             </button>
           </form>
         </div>
@@ -354,26 +301,7 @@ async function getUazapiWebhookUrl() {
   return `${protocol}://${host}/api/webhooks/uazapi?token=SEU_UAZAPI_WEBHOOK_SECRET`;
 }
 
-function getLatestIntegration(integrations: IntegrationRow[], provider: string) {
-  return integrations.find((integration) => integration.provider === provider && integration.active);
-}
-
 function configString(config: Record<string, unknown> | null | undefined, key: string) {
   const value = config?.[key];
   return typeof value === "string" ? value : "";
-}
-
-function configNumber(config: Record<string, unknown> | null | undefined, key: string, fallback: number) {
-  const value = Number(config?.[key]);
-  return Number.isFinite(value) ? value : fallback;
-}
-
-function configBoolean(config: Record<string, unknown> | null | undefined, key: string, fallback: boolean) {
-  const value = config?.[key];
-
-  if (typeof value === "boolean") {
-    return value;
-  }
-
-  return fallback;
 }

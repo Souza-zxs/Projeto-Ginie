@@ -191,7 +191,7 @@ export default async function InboxPage({
 
   return (
     <>
-      <PageHeader title="Inbox" description="Atendimento em tempo real das conversas Meta, Uazapi e HauzApp." />
+      <PageHeader title="Inbox" description="Atendimento em tempo real das conversas de WhatsApp." />
 
       <section className="mb-5 grid gap-3 md:grid-cols-5">
         <Metric icon={<MessageCircle className="h-4 w-4" />} label="Abertas" value={String(openCount)} />
@@ -557,7 +557,6 @@ function LeadPanel({
               <InfoRow label="Regiao" value={lead.region || "Nao informado"} />
               <InfoRow label="Orcamento" value={formatBudget(lead.budget)} />
               <InfoRow label="Pagamento" value={lead.payment_method || "Nao informado"} />
-              <InfoRow label="HauzApp" value={lead.hauzapp_cliente_id ? `ID ${lead.hauzapp_cliente_id}` : "Nao enviado"} />
               {lead.summary ? (
                 <div>
                   <p className="text-xs font-medium text-muted-foreground">Resumo da IA</p>
