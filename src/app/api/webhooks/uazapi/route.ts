@@ -5,6 +5,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { findUazapiOrganizationByToken } from "@/services/integrations/config";
 import { processUazapiLeadMessage } from "@/services/uazapi/lead-workflow";
 import {
+  describeUazapiPayloadShape,
   parseUazapiWebhook,
   redactUazapiPayload,
   type ParsedUazapiWebhook,
@@ -29,6 +30,8 @@ export async function POST(request: Request) {
   // Eventos que não interessam (status, conexão, mensagens nossas, grupos) respondem 200:
   // um erro faria a Uazapi reenviar o mesmo evento várias vezes.
   if (message.kind === "ignored") {
+    // Registra o descarte para diagnóstico (Configurações > Logs), sem telefone nem texto.
+    after(() => logIgnoredWebhook(payload, message.reason));
     return NextResponse.json({ processed: false, reason: message.reason });
   }
 
@@ -77,6 +80,22 @@ export async function POST(request: Request) {
   });
 
   return NextResponse.json({ received: true });
+}
+
+async function logIgnoredWebhook(payload: UazapiWebhookPayload, reason: string) {
+  try {
+    await createAdminClient()
+      .from("webhook_logs")
+      .insert({
+        organization_id: null,
+        provider: "uazapi",
+        event_type: "ignored",
+        payload: describeUazapiPayloadShape(payload, reason),
+        status: reason
+      });
+  } catch {
+    // Diagnóstico não pode derrubar o webhook.
+  }
 }
 
 async function handleIncomingMessage(

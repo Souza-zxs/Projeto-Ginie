@@ -69,6 +69,35 @@ export function redactUazapiPayload(payload: UazapiWebhookPayload): UazapiWebhoo
   return token ? { ...rest, token: "[removido]" } : rest;
 }
 
+/**
+ * Retrato do payload para diagnóstico: nomes dos campos, tipos e sinais (fromMe, grupo,
+ * tipo do JID), mas nunca telefone, texto da mensagem ou token. Usado para registrar
+ * mensagens descartadas sem expor dados pessoais nos logs.
+ */
+export function describeUazapiPayloadShape(payload: unknown, reason: string) {
+  const root = payload && typeof payload === "object" ? (payload as Record<string, unknown>) : {};
+  const message = root.message && typeof root.message === "object" ? (root.message as Record<string, unknown>) : null;
+  const jidKind = (value: unknown) =>
+    typeof value === "string" && value.includes("@") ? `@${value.split("@").pop()}` : typeof value;
+  const eventValue = (value: unknown) => (typeof value === "string" ? value.slice(0, 40) : typeof value);
+
+  return {
+    reason,
+    EventType: eventValue(root.EventType),
+    event: eventValue(root.event),
+    rootKeys: Object.keys(root),
+    messageType: typeof root.message,
+    messageKeys: message ? Object.keys(message) : [],
+    chatid: jidKind(message?.chatid),
+    sender: jidKind(message?.sender),
+    fromMe: message?.fromMe ?? null,
+    isGroup: message?.isGroup ?? null,
+    wasSentByApi: message?.wasSentByApi ?? null,
+    msgType: typeof message?.messageType === "string" ? message.messageType : null,
+    hasText: typeof message?.text === "string" && message.text.trim().length > 0
+  };
+}
+
 function extractMessage(payload: UazapiWebhookPayload): UazapiMessage | null {
   if (payload.message && typeof payload.message === "object") {
     return payload.message;

@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { parseUazapiWebhook, redactUazapiPayload } from "./webhook-payload.ts";
+import { describeUazapiPayloadShape, parseUazapiWebhook, redactUazapiPayload } from "./webhook-payload.ts";
 
 // Exemplo copiado de docs.uazapi.com/webhook/messages.
 const docExample = {
@@ -95,6 +95,19 @@ test("o token da instância nunca vai para o que é gravado", () => {
   assert.ok(!JSON.stringify(redacted).includes("INSTANCE_TOKEN"));
   assert.equal(redacted.message.text, "Olá, preciso de ajuda.");
   assert.equal(docExample.token, "INSTANCE_TOKEN"); // não altera o original
+});
+
+test("o retrato para diagnóstico não leva telefone, texto nem token", () => {
+  const shape = describeUazapiPayloadShape(docExample, "teste");
+  const serialized = JSON.stringify(shape);
+
+  assert.equal(shape.EventType, "messages");
+  assert.equal(shape.chatid, "@s.whatsapp.net");
+  assert.equal(shape.hasText, true);
+  assert.ok(shape.messageKeys.includes("messageid"));
+  for (const secret of ["5511888888888", "5511999999999", "Olá, preciso de ajuda", "INSTANCE_TOKEN", "Contato de exemplo"]) {
+    assert.ok(!serialized.includes(secret), `vazou: ${secret}`);
+  }
 });
 
 test("payload sem token continua sem token", () => {
