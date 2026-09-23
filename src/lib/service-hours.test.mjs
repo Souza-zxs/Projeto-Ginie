@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { describeServicePeriod, getGreeting, getServicePeriod } from "./service-hours.ts";
+import { describeServicePeriod, getGreeting, getServicePeriod, isNightTime } from "./service-hours.ts";
 
 // Lisboa no verão (até 25/10/2026) é UTC+1: 08:00Z = 09:00 locais.
 const summer = (hhmm) => new Date(`2026-09-22T${hhmm}:00+01:00`); // terça-feira
@@ -8,8 +8,8 @@ const summer = (hhmm) => new Date(`2026-09-22T${hhmm}:00+01:00`); // terça-feir
 const winter = (hhmm) => new Date(`2026-12-15T${hhmm}:00+00:00`); // terça-feira
 
 test("dia útil: limites do horário de atendimento", () => {
-  assert.equal(getServicePeriod(summer("08:59")), "closed");
-  assert.equal(getServicePeriod(summer("09:00")), "business");
+  assert.equal(getServicePeriod(summer("07:59")), "closed");
+  assert.equal(getServicePeriod(summer("08:00")), "business");
   assert.equal(getServicePeriod(summer("16:29")), "business");
   assert.equal(getServicePeriod(summer("16:30")), "evening");
   assert.equal(getServicePeriod(summer("19:59")), "evening");
@@ -32,6 +32,14 @@ test("fim de semana é sempre fora de horário", () => {
 
 test("virada de dia em Lisboa: 23:30Z de sexta já é sábado em Lisboa", () => {
   assert.equal(getServicePeriod(new Date("2026-09-25T23:30:00Z")), "closed");
+});
+
+test("noite é das 20h às 08h, inclusive no fim de semana", () => {
+  assert.equal(isNightTime(summer("07:59")), true);
+  assert.equal(isNightTime(summer("08:00")), false);
+  assert.equal(isNightTime(summer("19:59")), false);
+  assert.equal(isNightTime(summer("20:00")), true);
+  assert.equal(isNightTime(new Date("2026-09-26T11:00:00+01:00")), false); // sábado de manhã
 });
 
 test("cumprimentos de Portugal", () => {

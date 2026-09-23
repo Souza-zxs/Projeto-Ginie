@@ -10,7 +10,7 @@ export const SERVICE_TIMEZONE = "Europe/Lisbon";
  * Se o sistema passar a atender outro cliente, isto vira configuração por organização.
  */
 export const SERVICE_HOURS = {
-  opensAt: 9 * 60, // 09h00
+  opensAt: 8 * 60, // 08h00
   teamClosesAt: 16 * 60 + 30, // 16h30: fim do atendimento humano
   closesAt: 20 * 60 // 20h00: a partir daqui, mensagem de fora de horário
 };
@@ -46,6 +46,13 @@ export function getServicePeriod(date: Date = new Date(), timeZone: string = SER
   return minutes < SERVICE_HOURS.teamClosesAt ? "business" : "evening";
 }
 
+/** Noite segundo a cliente: das 20h às 08h do dia seguinte, sem regra de fim de semana. */
+export function isNightTime(date: Date = new Date(), timeZone: string = SERVICE_TIMEZONE) {
+  const { minutes } = getLocalParts(date, timeZone);
+
+  return minutes < SERVICE_HOURS.opensAt || minutes >= SERVICE_HOURS.closesAt;
+}
+
 /** Cumprimento de Portugal: Bom dia até às 12h, Boa tarde até às 20h, Boa noite depois. */
 export function getGreeting(date: Date = new Date(), timeZone: string = SERVICE_TIMEZONE) {
   const { minutes } = getLocalParts(date, timeZone);
@@ -57,11 +64,11 @@ export function getGreeting(date: Date = new Date(), timeZone: string = SERVICE_
 
 const PERIOD_INSTRUCTION: Record<ServicePeriod, string> = {
   business:
-    "DENTRO do horário de atendimento (2ª a 6ª, 09h00-16h30). Atenda normalmente.",
+    "DENTRO do horário de atendimento (2ª a 6ª, 08h00-16h30). Atenda normalmente.",
   evening:
     "FORA do horário da equipa (terminou às 16h30), mas antes das 20h00. Continue a atender e a recolher os dados, e diga que a equipa dá seguimento no dia útil seguinte.",
   closed:
-    "FORA do horário de atendimento (entre 20h00 e 09h00, ou fim de semana). Se ainda não enviou a mensagem de fora de horário nesta conversa hoje, envie-a. Pode recolher dados, mas não prometa contacto hoje."
+    "FORA do horário de atendimento (entre 20h00 e 08h00, ou fim de semana). Se ainda não enviou a mensagem de fora de horário nesta conversa hoje, envie-a. Pode recolher dados, mas não prometa contacto hoje."
 };
 
 /** Texto único para o agente: período, instrução e cumprimento, já calculados. */

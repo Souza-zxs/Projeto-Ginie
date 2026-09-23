@@ -9,6 +9,8 @@ import {
   type UazapiInstanceRef
 } from "@/services/integrations/config";
 import { getKnownLeadFacts, upsertLeadFromQualification } from "@/services/leads/workflow";
+import { isNightTime } from "@/lib/service-hours";
+import { decideMenuReply, readMenuStep } from "@/services/uazapi/menu-bot";
 import { sendUazapiMessage } from "@/services/uazapi/send-message";
 
 type AgentConfig = {
@@ -91,6 +93,18 @@ export async function processUazapiLeadMessage({
     return { processed: true, ai: false, conversationId: conversation.id };
   }
 
+  if (process.env.UAZAPI_MENU_BOT !== "off") {
+    return runMenuBot({
+      supabase,
+      organizationId,
+      conversationId: conversation.id,
+      contactId: contact.id,
+      phone: normalizedPhone,
+      text,
+      instance
+    });
+  }
+
   const agent = await getUazapiLeadAgent(supabase, organizationId, instance);
   // Ordem decrescente + limit traz as 30 mais RECENTES; depois volta à ordem cronológica.
   // Em ordem crescente viriam as 30 mais antigas e, numa conversa longa, o agente não
@@ -165,6 +179,76 @@ export async function processUazapiLeadMessage({
   ]);
 
   return { processed: true, ai: true, leadId: lead.id, conversationId: conversation.id };
+}
+
+async function runMenuBot({
+  supabase,
+  organizationId,
+  conversationId,
+  contactId,
+  phone,
+  text,
+  instance
+}: {
+  supabase: SupabaseClient;
+  organizationId: string;
+  conversationId: string;
+  contactId: string;
+  phone: string;
+  text: string;
+  instance?: UazapiInstanceRef;
+}) {
+  // O estado do menu vive no payload da última mensagem que o bot enviou.
+  const { data: lastOutbound } = await supabase
+    .from("messages")
+    .select("payload")
+    .eq("organization_id", organizationId)
+    .eq("conversation_id", conversationId)
+    .eq("direction", "outbound")
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle<{ payload: Record<string, unknown> | null }>();
+
+  const decision = decideMenuReply({
+    lastStep: readMenuStep(lastOutbound?.payload?.menu_step),
+    text,
+    night: isNightTime(),
+    recruitmentFormUrl: process.env.RECRUITMENT_FORM_URL || null
+  });
+  const uazapiConfig = await getUazapiIntegrationConfig(supabase, organizationId, instance);
+
+  for (const reply of decision.replies) {
+    const result = await sendUazapiMessage({
+      phone,
+      text: reply,
+      integrationConfig: {
+        baseUrl: configString(uazapiConfig, ["baseUrl", "base_url"], process.env.UAZAPI_BASE_URL) ?? undefined,
+        token: configString(uazapiConfig, ["token", "apiKey", "api_key"], process.env.UAZAPI_TOKEN) ?? undefined
+      }
+    });
+
+    await supabase.from("messages").insert({
+      organization_id: organizationId,
+      conversation_id: conversationId,
+      contact_id: contactId,
+      direction: "outbound",
+      channel: "uazapi",
+      type: "text",
+      content: reply,
+      status: "sent",
+      payload: { menu_step: decision.nextStep, result }
+    });
+  }
+
+  await supabase
+    .from("conversations")
+    .update({
+      last_message_at: new Date().toISOString(),
+      ...(decision.handoff ? { ai_enabled: false, current_stage: "human_handoff" } : {})
+    })
+    .eq("id", conversationId);
+
+  return { processed: true, ai: false, menu: decision.nextStep, conversationId };
 }
 
 async function getUazapiLeadAgent(
