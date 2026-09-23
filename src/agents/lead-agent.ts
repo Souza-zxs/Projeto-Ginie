@@ -1,6 +1,8 @@
 import { formatNowForAgent } from "@/lib/datetime";
 import { describeServicePeriod, getGreeting } from "@/lib/service-hours";
 import { AGENT_LANGUAGE_RULE } from "@/agents/locale";
+import { mergeKnownFacts, type KnownLeadFacts } from "@/agents/known-facts";
+import { enforceReplyGuardrails } from "@/agents/reply-guardrails";
 import { chatCompletion, hasLlmConfigured, resolveModel, type ChatMessage } from "@/lib/openai/chat";
 
 export type LeadQualification = {
@@ -22,6 +24,8 @@ export type LeadQualification = {
   reply: string;
 };
 
+export type { KnownLeadFacts };
+
 type LeadAgentInput = {
   contact: {
     name: string | null;
@@ -31,6 +35,9 @@ type LeadAgentInput = {
     property_description: string | null;
     agent_prompt: string | null;
   } | null;
+  /** Evita repetir pergunta já respondida: o modelo relê o histórico a cada turno e, sendo
+   * pequeno, erra ao reconstruir isso sozinho. Aqui o dado já vem pronto, sem precisar deduzir. */
+  known?: KnownLeadFacts | null;
   agent?: {
     name: string;
     description: string | null;
@@ -69,6 +76,7 @@ export async function runLeadAgent(input: LeadAgentInput): Promise<LeadQualifica
       "- Se a última mensagem for só um cumprimento, responde com o cumprimento indicado em `periodo` e uma pergunta curta.",
       "- Uma pergunta por mensagem; não acumules perguntas de qualificação.",
       "- Sem pontuação exagerada nem excesso de pontos de exclamação.",
+      "- O campo `known` no JSON do utilizador traz o que já sabemos desta pessoa, extraído em mensagens anteriores. NUNCA voltes a perguntar o que já está preenchido em `known`; pergunta só o que estiver em falta ou nulo.",
       input.agent?.humanization_rules
         ? `Tom e humanização:\n${input.agent.humanization_rules}`
         : "",
@@ -96,7 +104,11 @@ export async function runLeadAgent(input: LeadAgentInput): Promise<LeadQualifica
       "Campos obrigatórios: name, phone, interest, region, budget, paymentMethod, urgency,",
       "intention (um de: novo_servico | contrato_recorrente | formacao | indefinido),",
       "qualificationStatus, stage, score (0-100), summary (em português de Portugal), qualified (bool), wantsVisit (bool),",
-      "visitDatePreference, reply."
+      "visitDatePreference, reply.",
+      "",
+      // Repetida no fim de propósito: modelos pequenos dão mais atenção às últimas linhas
+      // do prompt. É a instrução mais ignorada quando fica só no início.
+      `Lembrete final sobre o campo reply: ${AGENT_LANGUAGE_RULE}`
     ]
       .filter(Boolean)
       .join("\n");
@@ -111,6 +123,7 @@ export async function runLeadAgent(input: LeadAgentInput): Promise<LeadQualifica
           instruction: input.campaign?.agent_prompt,
           service: input.campaign?.property_description,
           contact: input.contact,
+          known: input.known ?? null,
           messages: input.messages,
           now: formatNowForAgent(),
           periodo: describeServicePeriod()
@@ -177,7 +190,10 @@ export async function runLeadAgent(input: LeadAgentInput): Promise<LeadQualifica
       throw new Error(result.error || "Modelo nao retornou resposta.");
     }
 
-    return normalizeQualification(JSON.parse(extractJson(result.content)), input);
+    const qualification = normalizeQualification(JSON.parse(extractJson(result.content)), input);
+    const { reply } = enforceReplyGuardrails(qualification.reply);
+
+    return { ...qualification, reply };
   } catch {
     return heuristicQualification(input);
   }
@@ -212,16 +228,25 @@ function heuristicQualification(input: LeadAgentInput): LeadQualification {
   const score = Math.min(100, 30 + (budget ? 25 : 0) + (hasRegion ? 20 : 0) + (hasPayment ? 15 : 0));
   const qualified = score >= 70 || wantsVisit;
 
-  return {
-    name: input.contact.name,
-    phone: input.contact.phone,
-    interest: input.campaign?.property_description ?? "Serviço da campanha",
+  const extracted = {
+    interest: input.campaign?.property_description ?? null,
     region: hasRegion ? "Informada na conversa" : null,
     budget,
     paymentMethod: hasPayment ? "Informado na conversa" : null,
-    urgency: /urgente|rapido|rápido|essa semana|hoje|amanha|amanhã/.test(inboundText)
-      ? "alta"
-      : null,
+    urgency: /urgente|rapido|rápido|essa semana|hoje|amanha|amanhã/.test(inboundText) ? "alta" : null
+  };
+  const facts = mergeKnownFacts(extracted, input.known, {
+    interest: "Serviço da campanha",
+    region: null,
+    budget: null,
+    paymentMethod: null,
+    urgency: null
+  });
+
+  return {
+    name: input.contact.name,
+    phone: input.contact.phone,
+    ...facts,
     intention: /manuten|recorrent|mensalidade|assinatura/.test(inboundText)
       ? "contrato_recorrente"
       : /forma[cç][aã]o|curso|treinamento|capacita/.test(inboundText)
@@ -240,11 +265,13 @@ function heuristicQualification(input: LeadAgentInput): LeadQualification {
     visitDatePreference: extractVisitPreference(inboundText),
     // Respostas de reserva, usadas só quando o modelo falha. Vão direto para o cliente,
     // por isso em português de Portugal e sem prometer nada que dependa da equipa.
-    reply: greetingOnly
-      ? `${getGreeting()}. ${input.agent?.greeting_template || "Agradecemos o contacto. Em que podemos ajudar?"}`
-      : qualified
-        ? "Obrigado, já temos a informação necessária. Vou passar o seu pedido à nossa equipa, que entrará em contacto consigo."
-        : "Para o podermos ajudar melhor, pode dizer-me que serviço ou curso procura?"
+    reply: enforceReplyGuardrails(
+      greetingOnly
+        ? `${getGreeting()}. ${input.agent?.greeting_template || "Agradecemos o contacto. Em que podemos ajudar?"}`
+        : qualified
+          ? "Obrigado, já temos a informação necessária. Vou passar o seu pedido à nossa equipa, que entrará em contacto consigo."
+          : "Para o podermos ajudar melhor, pode dizer-me que serviço ou curso procura?"
+    ).reply
   };
 }
 
@@ -255,6 +282,9 @@ function normalizeQualification(value: Partial<LeadQualification>, input: LeadAg
     ...fallback,
     ...value,
     phone: input.contact.phone,
+    // Se o modelo devolveu null de novo para algo que já sabíamos (por não ter
+    // reextraído do histórico), mantém o que já estava salvo em vez de apagar.
+    ...mergeKnownFacts(value, input.known, fallback),
     score: Math.max(0, Math.min(100, Number(value.score ?? fallback.score))),
     qualified: Boolean(value.qualified ?? fallback.qualified),
     wantsVisit: Boolean(value.wantsVisit ?? fallback.wantsVisit),

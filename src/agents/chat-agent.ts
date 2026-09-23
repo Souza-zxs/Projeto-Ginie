@@ -1,6 +1,7 @@
 import { formatNowForAgent } from "@/lib/datetime";
 import { describeServicePeriod } from "@/lib/service-hours";
 import { AGENT_LANGUAGE_RULE } from "@/agents/locale";
+import { enforceReplyGuardrails } from "@/agents/reply-guardrails";
 import { chatCompletion, hasLlmConfigured, resolveModel, type ChatMessage } from "@/lib/openai/chat";
 
 type ChatAgentInput = {
@@ -53,7 +54,10 @@ export async function runAgentChat(input: ChatAgentInput) {
       : "",
     input.agent.handoff_instructions
       ? `Encaminhamento: ${input.agent.handoff_instructions}`
-      : ""
+      : "",
+    "",
+    // Repetida no fim de propósito: modelos pequenos dão mais atenção às últimas linhas.
+    `Lembrete final: ${AGENT_LANGUAGE_RULE}`
   ]
     .filter(Boolean)
     .join("\n");
@@ -83,5 +87,5 @@ export async function runAgentChat(input: ChatAgentInput) {
     throw new Error(result.error || "O modelo nao retornou resposta.");
   }
 
-  return result.content.trim();
+  return enforceReplyGuardrails(result.content.trim()).reply;
 }
