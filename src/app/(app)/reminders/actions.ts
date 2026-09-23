@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { parseLisbonLocalDateTime } from "@/lib/datetime";
 import { z } from "zod";
 import { getCurrentProfile } from "@/lib/auth/organization";
 import { publishJobProcessor } from "@/services/qstash/jobs";
@@ -32,7 +33,7 @@ export async function createReminderAction(formData: FormData) {
     return;
   }
 
-  const remindAt = new Date(parsed.data.remind_at);
+  const remindAt = parseLisbonLocalDateTime(parsed.data.remind_at) ?? new Date(parsed.data.remind_at);
 
   if (Number.isNaN(remindAt.getTime())) {
     return;

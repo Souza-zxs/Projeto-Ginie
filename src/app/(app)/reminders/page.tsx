@@ -1,4 +1,5 @@
 import { Bell } from "lucide-react";
+import { formatDateTime } from "@/lib/datetime";
 import { Badge } from "@/components/badge";
 import { PageHeader } from "@/components/page-header";
 import { getCurrentProfile } from "@/lib/auth/organization";
@@ -113,7 +114,7 @@ export default async function RemindersPage() {
                     <Badge tone={reminder.status === "sent" ? "success" : "muted"}>{reminder.status}</Badge>
                   </div>
                   <p className="mt-3 text-xs text-muted-foreground">
-                    {new Intl.DateTimeFormat("pt-BR", { dateStyle: "short", timeStyle: "short" }).format(new Date(reminder.remind_at))}
+                    {formatDateTime(reminder.remind_at)}
                   </p>
                 </div>
               ))

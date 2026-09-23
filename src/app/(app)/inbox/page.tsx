@@ -14,6 +14,7 @@ import { Badge } from "@/components/badge";
 import { PageHeader } from "@/components/page-header";
 import { cn } from "@/lib/utils";
 import { getCurrentProfile } from "@/lib/auth/organization";
+import { formatDateTime, formatShortDateTime, formatTime } from "@/lib/datetime";
 import { formatPhoneForDisplay } from "@/lib/phone";
 import { createClient } from "@/lib/supabase/server";
 import {
@@ -598,35 +599,13 @@ function getInitials(name: string) {
 }
 
 function formatShortDate(value: string | null) {
-  if (!value) {
-    return "--";
-  }
-
-  return new Intl.DateTimeFormat("pt-BR", {
-    day: "2-digit",
-    month: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit"
-  }).format(new Date(value));
+  return formatShortDateTime(value);
 }
 
 function formatMessageTime(value: string) {
-  return new Intl.DateTimeFormat("pt-BR", {
-    hour: "2-digit",
-    minute: "2-digit"
-  }).format(new Date(value));
+  return formatTime(value);
 }
 
 function formatLongDate(value: string | null) {
-  if (!value) {
-    return "Nao informado";
-  }
-
-  return new Intl.DateTimeFormat("pt-BR", {
-    day: "2-digit",
-    month: "2-digit",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit"
-  }).format(new Date(value));
+  return formatDateTime(value, "Nao informado");
 }

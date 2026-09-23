@@ -1,4 +1,5 @@
 import { Badge } from "@/components/badge";
+import { formatDateTime } from "@/lib/datetime";
 import { PageHeader } from "@/components/page-header";
 import { getCurrentProfile } from "@/lib/auth/organization";
 import { createClient } from "@/lib/supabase/server";
@@ -127,10 +128,7 @@ function LogCard({
                 <p className="mt-2 text-xs leading-5 text-muted-foreground">{row.detail}</p>
               ) : null}
               <p className="mt-2 text-xs text-muted-foreground">
-                {new Intl.DateTimeFormat("pt-BR", {
-                  dateStyle: "short",
-                  timeStyle: "short"
-                }).format(new Date(row.date))}
+                {formatDateTime(row.date)}
               </p>
             </article>
           ))

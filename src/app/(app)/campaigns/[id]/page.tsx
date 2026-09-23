@@ -1,4 +1,5 @@
 import { notFound } from "next/navigation";
+import { formatDateTime } from "@/lib/datetime";
 import { Badge } from "@/components/badge";
 import { PageHeader } from "@/components/page-header";
 import { getCurrentProfile } from "@/lib/auth/organization";
@@ -318,10 +319,7 @@ export default async function CampaignDetailPage({
                         <div>
                           <p className="text-sm font-medium text-slate-950">{job.job_type}</p>
                           <p className="text-xs text-muted-foreground">
-                            {new Intl.DateTimeFormat("pt-BR", {
-                              dateStyle: "short",
-                              timeStyle: "short"
-                            }).format(new Date(job.run_at))}
+                            {formatDateTime(job.run_at)}
                           </p>
                         </div>
                         <Badge tone={job.status === "done" ? "success" : job.status === "failed" ? "danger" : "muted"}>

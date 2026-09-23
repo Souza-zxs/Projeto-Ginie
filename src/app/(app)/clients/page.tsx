@@ -6,6 +6,7 @@ import { Badge } from "@/components/badge";
 import { EmptyState } from "@/components/empty-state";
 import { PageHeader } from "@/components/page-header";
 import { getCurrentProfile } from "@/lib/auth/organization";
+import { formatDateTime } from "@/lib/datetime";
 import { formatPhoneForDisplay } from "@/lib/phone";
 import { createClient } from "@/lib/supabase/server";
 import { cn } from "@/lib/utils";
@@ -234,15 +235,5 @@ function buildHref(params: { q?: string; topic?: string }) {
 }
 
 function formatDate(value: string | null) {
-  if (!value) {
-    return "--";
-  }
-
-  return new Intl.DateTimeFormat("pt-BR", {
-    day: "2-digit",
-    month: "2-digit",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit"
-  }).format(new Date(value));
+  return formatDateTime(value);
 }

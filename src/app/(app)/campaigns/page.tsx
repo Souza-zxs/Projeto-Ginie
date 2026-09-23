@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { formatDate } from "@/lib/datetime";
 import { Plus, Megaphone, FlaskConical } from "lucide-react";
 import type { Route } from "next";
 import { Badge } from "@/components/badge";
@@ -119,7 +120,7 @@ export default async function CampaignsPage() {
                     {campaign.contacts_count}
                   </td>
                   <td className="px-4 py-3 text-muted-foreground">
-                    {new Intl.DateTimeFormat("pt-BR").format(new Date(campaign.created_at))}
+                    {formatDate(campaign.created_at)}
                   </td>
                   <td className="px-4 py-3 text-right">
                     <DeleteCampaignButton
