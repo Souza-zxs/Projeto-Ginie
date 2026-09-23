@@ -64,16 +64,80 @@ test("toque na lista (choiceId) vale mais que o texto do rótulo", () => {
   assert.equal(decision.nextStep, "awaiting_2");
 });
 
-test("apoio domiciliário: escolhe o tipo, informa a zona e passa para a equipa", () => {
-  const zone = decideMenuReply({ lastStep: "awaiting_1", text: "Higiene pessoal", choiceId: "h1", night: false });
+test("apoio domiciliário: para quem, tipo, urgência, localidade e só então a equipa", () => {
+  const type = decideMenuReply({ lastStep: "awaiting_1", text: "Pai ou mãe", choiceId: "w2", night: false });
+
+  assert.equal(type.nextStep, "awaiting_1_type");
+  assert.equal(type.handoff, false);
+  assert.ok(type.list.choices.length >= 4);
+
+  const urgency = decideMenuReply({ lastStep: "awaiting_1_type", text: "Higiene pessoal", choiceId: "h1", night: false });
+
+  assert.equal(urgency.nextStep, "awaiting_1_urgency");
+  assert.equal(urgency.handoff, false);
+  assert.ok(urgency.list.choices.some((row) => row.includes("|u1|")));
+
+  const zone = decideMenuReply({ lastStep: "awaiting_1_urgency", text: "O quanto antes", choiceId: "u1", night: false });
 
   assert.equal(zone.nextStep, "awaiting_1_zone");
   assert.equal(zone.handoff, false);
   assert.equal(zone.list, undefined);
+  assert.match(zone.replies[0], /localidade/);
 
   const done = decideMenuReply({ lastStep: "awaiting_1_zone", text: "Lisboa, Benfica", night: false });
 
   assert.deepEqual(done, { replies: [HANDOFF_DAY], nextStep: "done", handoff: true });
+});
+
+test("localidade sem palavras (emoji, número) é pedida de novo; na segunda falha vai para a equipa", () => {
+  for (const text of ["👍", "123", "??", "a", ""]) {
+    const again = decideMenuReply({ lastStep: "awaiting_1_zone", text, night: false });
+
+    assert.equal(again.nextStep, "awaiting_1_zone_retry", text);
+    assert.equal(again.handoff, false);
+    assert.match(again.replies[0], /localidade/);
+  }
+
+  const ok = decideMenuReply({ lastStep: "awaiting_1_zone_retry", text: "Porto", night: false });
+  const giveUp = decideMenuReply({ lastStep: "awaiting_1_zone_retry", text: "👍", night: false });
+
+  assert.equal(ok.handoff, true);
+  assert.equal(giveUp.handoff, true);
+});
+
+test("nome e zona da candidatura também são pedidos de novo quando vêm sem palavras", () => {
+  const again = decideMenuReply({ lastStep: "awaiting_3_details", text: "😀", night: false, recruitmentFormUrl: "https://x.pt" });
+
+  assert.equal(again.nextStep, "awaiting_3_details_retry");
+  assert.equal(again.handoff, false);
+
+  const done = decideMenuReply({ lastStep: "awaiting_3_details_retry", text: "Ana, Porto", night: false, recruitmentFormUrl: "https://x.pt" });
+
+  assert.equal(done.handoff, true);
+  assert.ok(done.replies[0].includes("https://x.pt"));
+});
+
+test("toda lista tem a linha Outro, e escolhê-la vai direto para o atendimento manual", () => {
+  const lists = [
+    decideMenuReply({ lastStep: "menu", text: "1", night: false }).list,
+    decideMenuReply({ lastStep: "awaiting_1", text: "x", choiceId: "w1", night: false }).list,
+    decideMenuReply({ lastStep: "awaiting_1_type", text: "x", choiceId: "h1", night: false }).list,
+    decideMenuReply({ lastStep: "menu", text: "2", night: false }).list,
+    decideMenuReply({ lastStep: "menu", text: "3", night: false }).list
+  ];
+
+  for (const list of lists) {
+    assert.ok(list.choices.some((row) => row.startsWith("Outro|other|")), list.text);
+    assert.ok(list.choices.length <= 10, "WhatsApp aceita no máximo 10 linhas");
+  }
+
+  for (const step of ["awaiting_1", "awaiting_1_type", "awaiting_1_urgency", "awaiting_2", "awaiting_3"]) {
+    const tapped = decideMenuReply({ lastStep: step, text: "Outro", choiceId: "other", night: false, recruitmentFormUrl: "https://x.pt" });
+    const typed = decideMenuReply({ lastStep: step, text: "outro", night: true });
+
+    assert.deepEqual(tapped, { replies: [HANDOFF_DAY], nextStep: "done", handoff: true }, step);
+    assert.deepEqual(typed, { replies: [HANDOFF_NIGHT], nextStep: "done", handoff: true }, step);
+  }
 });
 
 test("formação: escolher um curso cita o nome e passa para a equipa", () => {
@@ -133,6 +197,9 @@ test("candidatura: experiência, nome e zona; depois o formulário e a equipa (�
 
 test("readMenuStep só aceita etapas conhecidas", () => {
   assert.equal(readMenuStep("awaiting_1_zone"), "awaiting_1_zone");
+  assert.equal(readMenuStep("awaiting_1_type"), "awaiting_1_type");
+  assert.equal(readMenuStep("awaiting_1_urgency"), "awaiting_1_urgency");
+  assert.equal(readMenuStep("awaiting_3_details_retry"), "awaiting_3_details_retry");
   assert.equal(readMenuStep("awaiting_4"), null);
   assert.equal(readMenuStep("x"), null);
   assert.equal(readMenuStep(undefined), null);

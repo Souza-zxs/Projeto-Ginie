@@ -18,6 +18,7 @@ import {
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { signOutAction } from "@/app/(app)/actions";
+import { InboxNavLink } from "@/components/inbox-nav-link";
 import { contrastForegroundHslTriplet, hexToHslTriplet } from "@/lib/branding/color";
 
 const DEFAULT_ORG_NAME = "DAR+ Serviços | Formação";
@@ -80,6 +81,10 @@ export function AppShell({
         </div>
         <nav className="space-y-1 p-4">
           {navigation.map((item) => {
+            if (item.href === "/inbox") {
+              return <InboxNavLink key={item.href} />;
+            }
+
             const Icon = item.icon;
             return (
               <Link

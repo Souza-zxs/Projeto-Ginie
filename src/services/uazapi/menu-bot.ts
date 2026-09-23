@@ -6,10 +6,14 @@ export type MenuStep =
   | "menu"
   | "menu_retry"
   | "awaiting_1"
+  | "awaiting_1_type"
+  | "awaiting_1_urgency"
   | "awaiting_1_zone"
+  | "awaiting_1_zone_retry"
   | "awaiting_2"
   | "awaiting_3"
   | "awaiting_3_details"
+  | "awaiting_3_details_retry"
   | "done";
 
 export type MenuChoice = 1 | 2 | 3 | 4;
@@ -65,11 +69,26 @@ const COURSES: Array<{ id: string; name: string; description: string }> = [
 const COURSE_LIST: MenuList = {
   text: "Obrigada pelo interesse na nossa formação! Toque no botão e escolha o curso que lhe interessa:",
   listButton: "Ver cursos",
-  choices: COURSES.map((course) => `${course.name}|${course.id}|${course.description}`)
+  choices: [...COURSES.map((course) => `${course.name}|${course.id}|${course.description}`), "Outro|other|Falar com a nossa equipa"]
 };
 
+const WHO_LIST: MenuList = {
+  text: "Obrigada! O apoio domiciliário é para quem? Toque no botão e escolha:",
+  listButton: "Ver opções",
+  choices: [
+    "Para mim|w1|Sou eu quem precisa de apoio",
+    "Pai ou mãe|w2|Apoio a um dos meus pais",
+    "Outro familiar|w3|Avós, tios, cônjuge, irmãos…",
+    "Amigo ou conhecido|w4|Apoio a alguém próximo",
+    "Outro|other|Falar com a nossa equipa"
+  ]
+};
+
+const HELP_TEXT =
+  "E que tipo de apoio procura (higiene pessoal, refeições, companhia, medicação, apoio doméstico, vários serviços ou outro)?";
+
 const HELP_LIST: MenuList = {
-  text: "Obrigada! Que tipo de apoio procura? Toque no botão e escolha a opção mais próxima:",
+  text: "E que tipo de apoio procura? Toque no botão e escolha a opção mais próxima:",
   listButton: "Ver apoios",
   choices: [
     "Higiene pessoal|h1|Banho, vestir e cuidados de conforto",
@@ -77,7 +96,21 @@ const HELP_LIST: MenuList = {
     "Companhia|h3|Acompanhamento e conversa",
     "Medicação|h4|Apoio na toma da medicação",
     "Apoio doméstico|h5|Limpezas e tarefas da casa",
-    "Vários serviços|h6|Mais do que um tipo de apoio"
+    "Vários serviços|h6|Mais do que um tipo de apoio",
+    "Outro|other|Falar com a nossa equipa"
+  ]
+};
+
+const URGENCY_TEXT = "E para quando precisa do apoio (o quanto antes, nas próximas semanas ou só para se informar)?";
+
+const URGENCY_LIST: MenuList = {
+  text: "E para quando precisa do apoio? Toque no botão e escolha:",
+  listButton: "Ver opções",
+  choices: [
+    "O quanto antes|u1|Preciso de apoio com urgência",
+    "Próximas semanas|u2|Nas próximas semanas",
+    "Só a informar-me|u3|Ainda estou a avaliar",
+    "Outro|other|Falar com a nossa equipa"
   ]
 };
 
@@ -88,12 +121,29 @@ const EXPERIENCE_LIST: MenuList = {
     "Tenho experiência|e1|Já trabalhei na área",
     "Tenho formação|e2|Curso ou formação na área",
     "Experiência e formação|e3|Tenho as duas",
-    "Ainda sem experiência|e4|Quero começar na área"
+    "Ainda sem experiência|e4|Quero começar na área",
+    "Outro|other|Falar com a nossa equipa"
   ]
 };
 
-const ASK_ZONE = "E em que zona reside a pessoa a apoiar?";
+const ASK_ZONE = "Por fim, em que localidade reside a pessoa a apoiar?";
+const ASK_ZONE_AGAIN = "Não consegui perceber a localidade. Pode escrever o nome da localidade (por exemplo, a cidade ou a freguesia)?";
 const ASK_CANDIDATE_DETAILS = "Pode indicar-nos o seu nome e a zona onde reside?";
+const ASK_CANDIDATE_DETAILS_AGAIN = "Não consegui perceber. Pode escrever o seu nome e a zona onde reside?";
+
+/** Resposta de texto livre válida: pelo menos duas letras seguidas (emoji, números ou pontuação não servem). */
+function hasWords(text: string) {
+  return /\p{L}{2,}/u.test(text);
+}
+
+/** "Outro" tocado na lista (id "other") ou digitado; leva direto para o atendimento manual. */
+function isOther(choiceId: string | null | undefined, text: string) {
+  if (choiceId === "other") {
+    return true;
+  }
+
+  return /^outr[oa]s?$/.test(text.normalize("NFKD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/[.!?\s]+$/g, "").trim());
+}
 
 function courseNameFromChoice(choiceId?: string | null) {
   return COURSES.find((course) => course.id === choiceId)?.name ?? null;
@@ -102,19 +152,19 @@ function courseNameFromChoice(choiceId?: string | null) {
 export const MENU_RETRY_PREFIX = "Desculpe, não consegui perceber a sua resposta.";
 
 export const OPTION_REPLIES: Record<1 | 2 | 3, string> = {
-  1: "Obrigada! Que tipo de apoio procura (higiene pessoal, refeições, companhia, medicação, apoio doméstico ou vários serviços)?",
+  1: "Obrigada! O apoio domiciliário é para quem (para si, pai ou mãe, outro familiar, amigo, conhecido ou outro)?",
   2: [
     "Obrigada pelo interesse na nossa formação! Estes são os cursos disponíveis:",
     "• Técnico de Geriatria 360º com Estágio Prático: b-learning, 60h online + 120h de estágio",
     "• Animação Sociocultural com Idosos com Estágio Prático: b-learning, 40h online + 20h de prática",
     "• Gestão de ERPI, Centro de Dia e SAD: e-learning síncrono, 60h de aulas ao vivo + 15h de projeto final",
     "• Prevenção do Burnout no Cuidador de Idosos: e-learning assíncrono, 4h",
-    "Alguns cursos também têm módulos avulsos. Qual destes lhe interessa?"
+    "Alguns cursos também têm módulos avulsos. Qual destes lhe interessa (ou escreva 'outro')?"
   ].join("\n"),
-  3: "Obrigada pelo interesse em trabalhar na DAR+! Tem experiência ou formação na área?"
+  3: "Obrigada pelo interesse em trabalhar na DAR+! Tem experiência ou formação na área (ou escreva 'outro')?"
 };
 
-const OPTION_LISTS: Record<1 | 2 | 3, MenuList> = { 1: HELP_LIST, 2: COURSE_LIST, 3: EXPERIENCE_LIST };
+const OPTION_LISTS: Record<1 | 2 | 3, MenuList> = { 1: WHO_LIST, 2: COURSE_LIST, 3: EXPERIENCE_LIST };
 
 export const HANDOFF_DAY = "Obrigada! Já passámos o seu pedido a um membro da nossa equipa, que dará seguimento assim que possível.";
 export const HANDOFF_NIGHT = "Recebemos o seu contacto. Será contactado por um membro da nossa equipa logo que possível.";
@@ -133,7 +183,7 @@ export function parseMenuChoice(text: string): MenuChoice | null {
 }
 
 export function readMenuStep(value: unknown): MenuStep | null {
-  const steps: MenuStep[] = ["menu", "menu_retry", "awaiting_1", "awaiting_1_zone", "awaiting_2", "awaiting_3", "awaiting_3_details", "done"];
+  const steps: MenuStep[] = ["menu", "menu_retry", "awaiting_1", "awaiting_1_type", "awaiting_1_urgency", "awaiting_1_zone", "awaiting_1_zone_retry", "awaiting_2", "awaiting_3", "awaiting_3_details", "awaiting_3_details_retry", "done"];
 
   return typeof value === "string" && (steps as string[]).includes(value) ? (value as MenuStep) : null;
 }
@@ -199,16 +249,30 @@ export function decideMenuReply({ lastStep, text, choiceId, night, recruitmentFo
     return closing({ night, choice: null });
   }
 
+  const other = isOther(choiceId, text);
+
   switch (lastStep) {
     case "awaiting_1":
-      return { replies: [ASK_ZONE], nextStep: "awaiting_1_zone", handoff: false };
+      return other ? closing({ night, choice: null }) : { replies: [HELP_TEXT], nextStep: "awaiting_1_type", handoff: false, list: HELP_LIST };
+    case "awaiting_1_type":
+      return other ? closing({ night, choice: null }) : { replies: [URGENCY_TEXT], nextStep: "awaiting_1_urgency", handoff: false, list: URGENCY_LIST };
+    case "awaiting_1_urgency":
+      return other ? closing({ night, choice: null }) : { replies: [ASK_ZONE], nextStep: "awaiting_1_zone", handoff: false };
     case "awaiting_1_zone":
+      return hasWords(text)
+        ? closing({ night, choice: 1 })
+        : { replies: [ASK_ZONE_AGAIN], nextStep: "awaiting_1_zone_retry", handoff: false };
+    case "awaiting_1_zone_retry":
       return closing({ night, choice: 1 });
     case "awaiting_2":
-      return closing({ night, choice: 2, courseName: courseNameFromChoice(choiceId) });
+      return closing({ night, choice: 2, courseName: other ? null : courseNameFromChoice(choiceId) });
     case "awaiting_3":
-      return { replies: [ASK_CANDIDATE_DETAILS], nextStep: "awaiting_3_details", handoff: false };
+      return other ? closing({ night, choice: null }) : { replies: [ASK_CANDIDATE_DETAILS], nextStep: "awaiting_3_details", handoff: false };
     case "awaiting_3_details":
+      return hasWords(text)
+        ? closing({ night, choice: 3, recruitmentFormUrl })
+        : { replies: [ASK_CANDIDATE_DETAILS_AGAIN], nextStep: "awaiting_3_details_retry", handoff: false };
+    case "awaiting_3_details_retry":
       return closing({ night, choice: 3, recruitmentFormUrl });
     default:
       return { replies: [MENU_WELCOME], nextStep: "menu", handoff: false, list: menuList() };

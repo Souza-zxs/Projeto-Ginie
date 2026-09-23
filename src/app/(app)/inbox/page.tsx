@@ -21,6 +21,7 @@ import { getCurrentProfile } from "@/lib/auth/organization";
 import { createClient } from "@/lib/supabase/server";
 import { AgentTester } from "./agent-tester";
 import { AutoRefresh } from "@/components/auto-refresh";
+import { ChatMessages } from "./chat-messages";
 import { ManualReplyForm } from "./manual-reply-form";
 import {
   qualifyManuallyAction,
@@ -210,9 +211,9 @@ export default async function InboxPage({
         <AgentTester agents={testableAgents ?? []} />
       </div>
 
-      <section className="grid min-h-[740px] overflow-hidden rounded-lg border bg-card shadow-sm xl:grid-cols-[360px_minmax(0,1fr)_340px]">
-        <aside className="border-r bg-white">
-          <div className="border-b p-4">
+      <section className="grid overflow-hidden rounded-lg border bg-card shadow-sm xl:h-[calc(100vh-9rem)] xl:min-h-[600px] xl:grid-cols-[360px_minmax(0,1fr)_340px]">
+        <aside className="flex min-h-0 flex-col border-r bg-white">
+          <div className="shrink-0 border-b p-4">
             <div className="flex items-center justify-between gap-3">
               <div>
                 <h2 className="text-sm font-semibold text-slate-950">Conversas</h2>
@@ -252,7 +253,7 @@ export default async function InboxPage({
             </div>
           </div>
 
-          <div className="max-h-[650px] overflow-y-auto">
+          <div className="max-h-[420px] overflow-y-auto xl:max-h-none xl:min-h-0 xl:flex-1">
             {filteredConversations.length ? (
               filteredConversations.map((conversation) => (
                 <ConversationItem
@@ -274,13 +275,13 @@ export default async function InboxPage({
           </div>
         </aside>
 
-        <main className="flex min-h-[740px] flex-col bg-slate-50">
+        <main className="flex min-h-[480px] min-w-0 flex-col bg-slate-50 xl:min-h-0">
           {activeConversation ? (
             <>
               <ChatHeader conversation={activeConversation} />
               <ConversationActions conversation={activeConversation} />
 
-              <div className="flex-1 space-y-3 overflow-y-auto px-5 py-5">
+              <ChatMessages conversationId={activeConversation.id} messageCount={messages?.length ?? 0}>
                 {messages?.length ? (
                   messages.map((message) => <MessageBubble key={message.id} message={message} />)
                 ) : (
@@ -288,7 +289,7 @@ export default async function InboxPage({
                     Sem mensagens nesta conversa.
                   </div>
                 )}
-              </div>
+              </ChatMessages>
 
               <ManualReplyForm conversationId={activeConversation.id} />
             </>
@@ -299,7 +300,7 @@ export default async function InboxPage({
           )}
         </main>
 
-        <aside className="border-l bg-white">
+        <aside className="min-h-0 overflow-hidden border-l bg-white">
           {activeConversation ? (
             <LeadPanel conversation={activeConversation} lead={lead ?? null} assignment={assignment ?? null} />
           ) : (
@@ -506,7 +507,7 @@ function LeadPanel({
   assignment: AssignmentRow | null;
 }) {
   return (
-    <div className="max-h-[740px] overflow-y-auto p-5">
+    <div className="max-h-[740px] overflow-y-auto p-5 xl:h-full xl:max-h-none">
       <div className="flex items-center gap-3 border-b pb-4">
         <div className="flex h-11 w-11 items-center justify-center rounded-md bg-slate-100 text-slate-700">
           <UserRound className="h-5 w-5" />
