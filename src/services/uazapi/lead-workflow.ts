@@ -99,7 +99,9 @@ export async function processUazapiLeadMessage({
     campaign: {
       property_description:
         "Lead que entrou em contato pelo WhatsApp. Entenda a necessidade, qualifique e, quando fizer sentido, conduza para o próximo passo.",
-      agent_prompt: agent?.system_prompt ?? null
+      // O prompt do agente já vai no system (runLeadAgent). Repeti-lo aqui dobrava o
+      // tamanho e empurrava a conversa para fora da janela de contexto do modelo local.
+      agent_prompt: null
     },
     agent,
     messages

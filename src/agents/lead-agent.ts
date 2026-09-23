@@ -1,4 +1,5 @@
 import { formatNowForAgent } from "@/lib/datetime";
+import { describeServicePeriod } from "@/lib/service-hours";
 import { chatCompletion, hasLlmConfigured, resolveModel, type ChatMessage } from "@/lib/openai/chat";
 
 export type LeadQualification = {
@@ -58,15 +59,13 @@ export async function runLeadAgent(input: LeadAgentInput): Promise<LeadQualifica
       input.agent?.system_prompt ||
         "Voce e um consultor da DAR+ Servicos e Formacao. Responda curto, qualifique o lead e devolva JSON valido.",
       "",
-      "Regras de cadencia para a resposta em reply:",
+      "Regras de ritmo para a resposta em reply:",
       input.agent?.greeting_template
-        ? `Saudacao preferida para resposta curta: ${input.agent.greeting_template}`
+        ? `Saudação preferida para resposta curta: ${input.agent.greeting_template}`
         : "",
-      "- Se a ultima mensagem do lead for apenas uma saudacao curta, como 'oi', 'ola', 'bom dia' ou similar, use a saudacao preferida, sem ponto de exclamacao inicial e sem empilhar perguntas.",
-      "- Lembre que o lead respondeu a um disparo; nao responda como inbound generico.",
-      "- Evite 'Oi!' e pontuacao empolgada no inicio. Prefira 'Olá,' ou a saudacao configurada.",
-      "- Nao empilhe perguntas de qualificacao na primeira resposta curta.",
-      "- Avance a qualificacao em passos pequenos, uma pergunta por mensagem sempre que possivel.",
+      "- Se a última mensagem for só um cumprimento, responda com o cumprimento indicado em `periodo` e uma pergunta curta.",
+      "- Uma pergunta por mensagem; não empilhe perguntas de qualificação.",
+      "- Sem pontuação exagerada nem excesso de pontos de exclamação.",
       input.agent?.humanization_rules
         ? `Humanizacao configurada:\n${input.agent.humanization_rules}`
         : "",
@@ -85,10 +84,10 @@ export async function runLeadAgent(input: LeadAgentInput): Promise<LeadQualifica
         : "",
       "- Mesmo devolvendo JSON, o campo reply deve soar como WhatsApp humano e natural.",
       "",
-      // Este texto e a hora vao em partes diferentes de proposito: o system fica identico
-      // entre chamadas (o Ollama reaproveita o cache do prompt) e so o campo `now`, no fim
-      // da mensagem do usuario, muda.
-      "O campo `now` do JSON do usuario traz a data e hora atuais. Use isso para decidir se esta dentro ou fora do horario de atendimento.",
+      // Este texto e o período vão em partes diferentes de propósito: o system fica idêntico
+      // entre chamadas (o Ollama reaproveita o cache do prompt) e só `now`/`periodo`, no fim
+      // da mensagem do usuário, mudam.
+      "O campo `now` traz a data e hora de Portugal, e `periodo` diz se está dentro ou fora do horário de atendimento e qual cumprimento usar. Siga `periodo`: ele já está calculado, não refaça a conta.",
       "",
       "Responda SOMENTE com um objeto JSON valido, sem texto antes ou depois, sem blocos de codigo.",
       "Campos obrigatorios: name, phone, interest, region, budget, paymentMethod, urgency,",
@@ -110,7 +109,8 @@ export async function runLeadAgent(input: LeadAgentInput): Promise<LeadQualifica
           service: input.campaign?.property_description,
           contact: input.contact,
           messages: input.messages,
-          now: formatNowForAgent()
+          now: formatNowForAgent(),
+          periodo: describeServicePeriod()
         })
       }
     ];

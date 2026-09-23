@@ -1,4 +1,5 @@
 import { formatNowForAgent } from "@/lib/datetime";
+import { describeServicePeriod } from "@/lib/service-hours";
 import { chatCompletion, hasLlmConfigured, resolveModel, type ChatMessage } from "@/lib/openai/chat";
 
 type ChatAgentInput = {
@@ -29,15 +30,13 @@ export async function runAgentChat(input: ChatAgentInput) {
   const systemPrompt = [
     input.agent.system_prompt,
     "",
-    "Regras de cadencia para soar humano:",
+    "Regras de ritmo para soar humano:",
     input.agent.greeting_template
-      ? `Saudacao preferida para resposta curta: ${input.agent.greeting_template}`
+      ? `Saudação preferida para resposta curta: ${input.agent.greeting_template}`
       : "",
-    "- Se a ultima mensagem do lead for apenas uma saudacao curta, como 'oi', 'ola', 'bom dia' ou similar, use a saudacao preferida, sem ponto de exclamacao inicial e sem empilhar perguntas.",
-    "- Lembre que o lead respondeu a um disparo; nao responda como inbound generico.",
-    "- Evite 'Oi!' e pontuacao empolgada no inicio. Prefira 'Olá,' ou a saudacao configurada.",
-    "- Nao empilhe perguntas de qualificacao na primeira resposta curta.",
-    "- Avance a qualificacao em passos pequenos, uma pergunta por mensagem sempre que possivel.",
+    "- Se a última mensagem for só um cumprimento, responda com o cumprimento indicado no período e uma pergunta curta.",
+    "- Uma pergunta por mensagem; não empilhe perguntas de qualificação.",
+    "- Sem pontuação exagerada nem excesso de pontos de exclamação.",
     input.agent.humanization_rules ? `Humanizacao configurada:\n${input.agent.humanization_rules}` : "",
     input.agent.forbidden_phrases ? `Frases proibidas:\n${input.agent.forbidden_phrases}` : "",
     input.agent.conversation_examples ? `Exemplos bons:\n${input.agent.conversation_examples}` : "",
@@ -64,12 +63,12 @@ export async function runAgentChat(input: ChatAgentInput) {
     }))
   ];
 
-  // A hora vai na ultima mensagem, e nao no system, para o system ficar identico entre
-  // chamadas e o Ollama reaproveitar o cache do prompt.
+  // A hora e o período vão na última mensagem, e não no system, para o system ficar
+  // idêntico entre chamadas e o Ollama reaproveitar o cache do prompt.
   const last = messages[messages.length - 1];
 
   if (last?.role === "user") {
-    last.content = `${last.content}\n\n[Agora e ${formatNowForAgent()}. Use isso para decidir se esta dentro ou fora do horario de atendimento.]`;
+    last.content = `${last.content}\n\n[Agora é ${formatNowForAgent()}. Período (já calculado, não refaça a conta): ${describeServicePeriod()}]`;
   }
 
   const result = await chatCompletion({
