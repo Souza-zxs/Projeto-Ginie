@@ -10,10 +10,12 @@ export type MenuStep =
   | "awaiting_1_urgency"
   | "awaiting_1_zone"
   | "awaiting_1_zone_retry"
+  | "awaiting_1_confirm"
   | "awaiting_2"
   | "awaiting_3"
   | "awaiting_3_details"
   | "awaiting_3_details_retry"
+  | "awaiting_3_confirm"
   | "done";
 
 export type MenuChoice = 1 | 2 | 3 | 4;
@@ -66,29 +68,35 @@ const COURSES: Array<{ id: string; name: string; description: string }> = [
   { id: "c5", name: "Módulos avulsos", description: "Módulos soltos de alguns dos cursos" }
 ];
 
+const OTHER_ROW = "Outro|other|Falar com a nossa equipa";
+const BACK_ROW = "← Voltar|back|Corrigir a resposta anterior";
+const BACK_TO_MENU_ROW = "← Voltar|back|Voltar ao menu principal";
+const BACK_HINT = "Se se enganou, escolha “← Voltar”.";
+
 const COURSE_LIST: MenuList = {
-  text: "Obrigada pelo interesse na nossa formação! Toque no botão e escolha o curso que lhe interessa:",
+  text: `Obrigada pelo interesse na nossa formação! Toque no botão e escolha o curso que lhe interessa.\n${BACK_HINT}`,
   listButton: "Ver cursos",
-  choices: [...COURSES.map((course) => `${course.name}|${course.id}|${course.description}`), "Outro|other|Falar com a nossa equipa"]
+  choices: [...COURSES.map((course) => `${course.name}|${course.id}|${course.description}`), OTHER_ROW, BACK_TO_MENU_ROW]
 };
 
 const WHO_LIST: MenuList = {
-  text: "Obrigada! O apoio domiciliário é para quem? Toque no botão e escolha:",
+  text: `Obrigada! O apoio domiciliário é para quem? Toque no botão e escolha.\n${BACK_HINT}`,
   listButton: "Ver opções",
   choices: [
     "Para mim|w1|Sou eu quem precisa de apoio",
     "Pai ou mãe|w2|Apoio a um dos meus pais",
     "Outro familiar|w3|Avós, tios, cônjuge, irmãos…",
     "Amigo ou conhecido|w4|Apoio a alguém próximo",
-    "Outro|other|Falar com a nossa equipa"
+    OTHER_ROW,
+    BACK_TO_MENU_ROW
   ]
 };
 
 const HELP_TEXT =
-  "E que tipo de apoio procura (higiene pessoal, refeições, companhia, medicação, apoio doméstico, vários serviços ou outro)?";
+  "E que tipo de apoio procura (higiene pessoal, refeições, companhia, medicação, apoio doméstico, vários serviços ou outro)? Para corrigir a resposta anterior, escreva 'voltar'.";
 
 const HELP_LIST: MenuList = {
-  text: "E que tipo de apoio procura? Toque no botão e escolha a opção mais próxima:",
+  text: `E que tipo de apoio procura? Toque no botão e escolha a opção mais próxima.\n${BACK_HINT}`,
   listButton: "Ver apoios",
   choices: [
     "Higiene pessoal|h1|Banho, vestir e cuidados de conforto",
@@ -97,38 +105,42 @@ const HELP_LIST: MenuList = {
     "Medicação|h4|Apoio na toma da medicação",
     "Apoio doméstico|h5|Limpezas e tarefas da casa",
     "Vários serviços|h6|Mais do que um tipo de apoio",
-    "Outro|other|Falar com a nossa equipa"
+    OTHER_ROW,
+    BACK_ROW
   ]
 };
 
-const URGENCY_TEXT = "E para quando precisa do apoio (o quanto antes, nas próximas semanas ou só para se informar)?";
+const URGENCY_TEXT =
+  "E para quando precisa do apoio (o quanto antes, nas próximas semanas ou só para se informar)? Para corrigir a resposta anterior, escreva 'voltar'.";
 
 const URGENCY_LIST: MenuList = {
-  text: "E para quando precisa do apoio? Toque no botão e escolha:",
+  text: `E para quando precisa do apoio? Toque no botão e escolha.\n${BACK_HINT}`,
   listButton: "Ver opções",
   choices: [
     "O quanto antes|u1|Preciso de apoio com urgência",
     "Próximas semanas|u2|Nas próximas semanas",
     "Só a informar-me|u3|Ainda estou a avaliar",
-    "Outro|other|Falar com a nossa equipa"
+    OTHER_ROW,
+    BACK_ROW
   ]
 };
 
 const EXPERIENCE_LIST: MenuList = {
-  text: "Obrigada pelo interesse em trabalhar na DAR+! Tem experiência ou formação na área? Toque no botão e escolha:",
+  text: `Obrigada pelo interesse em trabalhar na DAR+! Tem experiência ou formação na área? Toque no botão e escolha.\n${BACK_HINT}`,
   listButton: "Ver opções",
   choices: [
     "Tenho experiência|e1|Já trabalhei na área",
     "Tenho formação|e2|Curso ou formação na área",
     "Experiência e formação|e3|Tenho as duas",
     "Ainda sem experiência|e4|Quero começar na área",
-    "Outro|other|Falar com a nossa equipa"
+    OTHER_ROW,
+    BACK_TO_MENU_ROW
   ]
 };
 
-const ASK_ZONE = "Por fim, em que localidade reside a pessoa a apoiar?";
+const ASK_ZONE = "Por fim, em que localidade reside a pessoa a apoiar? Para corrigir a resposta anterior, escreva 'voltar'.";
 const ASK_ZONE_AGAIN = "Não consegui perceber a localidade. Pode escrever o nome da localidade (por exemplo, a cidade ou a freguesia)?";
-const ASK_CANDIDATE_DETAILS = "Pode indicar-nos o seu nome e a zona onde reside?";
+const ASK_CANDIDATE_DETAILS = "Pode indicar-nos o seu nome e a zona onde reside? Para corrigir a resposta anterior, escreva 'voltar'.";
 const ASK_CANDIDATE_DETAILS_AGAIN = "Não consegui perceber. Pode escrever o seu nome e a zona onde reside?";
 
 /** Resposta de texto livre válida: pelo menos duas letras seguidas (emoji, números ou pontuação não servem). */
@@ -136,13 +148,62 @@ function hasWords(text: string) {
   return /\p{L}{2,}/u.test(text);
 }
 
+function normalizeWord(text: string) {
+  return text
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[.!?\s]+$/g, "")
+    .trim();
+}
+
 /** "Outro" tocado na lista (id "other") ou digitado; leva direto para o atendimento manual. */
 function isOther(choiceId: string | null | undefined, text: string) {
-  if (choiceId === "other") {
-    return true;
-  }
+  return choiceId === "other" || /^outr[oa]s?$/.test(normalizeWord(text));
+}
 
-  return /^outr[oa]s?$/.test(text.normalize("NFKD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/[.!?\s]+$/g, "").trim());
+/** "← Voltar" tocado na lista (id "back") ou "voltar" digitado. */
+function isBack(choiceId: string | null | undefined, text: string) {
+  return choiceId === "back" || normalizeWord(text) === "voltar";
+}
+
+const CONFIRM_ROWS = ["Sim, está certo|yes|Enviar para a equipa", "Corrigir|fix|Escrever de novo", BACK_ROW];
+
+function shorten(value: string) {
+  const clean = value.replace(/\s+/g, " ").trim();
+
+  return clean.length > 200 ? `${clean.slice(0, 197)}…` : clean;
+}
+
+/** Pede para confirmar o texto livre da última pergunta antes de encaminhar para a equipa. */
+function confirmation(step: "awaiting_1_confirm" | "awaiting_3_confirm", answer: string): MenuDecision {
+  const question =
+    step === "awaiting_1_confirm"
+      ? `Confirma que a localidade é «${shorten(answer)}»?`
+      : `Confirma o seu nome e zona: «${shorten(answer)}»?`;
+
+  return {
+    replies: [`${question} Responda 'sim' para confirmar ou 'corrigir' para escrever de novo.`],
+    nextStep: step,
+    handoff: false,
+    list: {
+      text: `${question}\nSe estiver errado, escolha “Corrigir”.`,
+      listButton: "Ver opções",
+      choices: CONFIRM_ROWS
+    }
+  };
+}
+
+const YES_WORDS = new Set(["sim", "confirmo", "sim confirmo", "certo", "correto", "esta certo", "esta correto", "ok", "isso", "exato"]);
+
+/** "Sim, está certo" tocado (id "yes") ou dito por extenso. */
+function isYes(choiceId: string | null | undefined, text: string) {
+  return choiceId === "yes" || YES_WORDS.has(normalizeWord(text).replace(/[,]/g, ""));
+}
+
+/** "Corrigir" tocado (id "fix") ou dito: "corrigir", "não", "errado"... */
+function isFix(choiceId: string | null | undefined, text: string) {
+  return choiceId === "fix" || /^(nao|corrigir|errad)/.test(normalizeWord(text));
 }
 
 function courseNameFromChoice(choiceId?: string | null) {
@@ -152,16 +213,16 @@ function courseNameFromChoice(choiceId?: string | null) {
 export const MENU_RETRY_PREFIX = "Desculpe, não consegui perceber a sua resposta.";
 
 export const OPTION_REPLIES: Record<1 | 2 | 3, string> = {
-  1: "Obrigada! O apoio domiciliário é para quem (para si, pai ou mãe, outro familiar, amigo, conhecido ou outro)?",
+  1: "Obrigada! O apoio domiciliário é para quem (para si, pai ou mãe, outro familiar, amigo, conhecido ou outro)? Se se enganou, escreva 'voltar'.",
   2: [
     "Obrigada pelo interesse na nossa formação! Estes são os cursos disponíveis:",
     "• Técnico de Geriatria 360º com Estágio Prático: b-learning, 60h online + 120h de estágio",
     "• Animação Sociocultural com Idosos com Estágio Prático: b-learning, 40h online + 20h de prática",
     "• Gestão de ERPI, Centro de Dia e SAD: e-learning síncrono, 60h de aulas ao vivo + 15h de projeto final",
     "• Prevenção do Burnout no Cuidador de Idosos: e-learning assíncrono, 4h",
-    "Alguns cursos também têm módulos avulsos. Qual destes lhe interessa (ou escreva 'outro')?"
+    "Alguns cursos também têm módulos avulsos. Qual destes lhe interessa (ou escreva 'outro')? Se se enganou, escreva 'voltar'."
   ].join("\n"),
-  3: "Obrigada pelo interesse em trabalhar na DAR+! Tem experiência ou formação na área (ou escreva 'outro')?"
+  3: "Obrigada pelo interesse em trabalhar na DAR+! Tem experiência ou formação na área (ou escreva 'outro')? Se se enganou, escreva 'voltar'."
 };
 
 const OPTION_LISTS: Record<1 | 2 | 3, MenuList> = { 1: WHO_LIST, 2: COURSE_LIST, 3: EXPERIENCE_LIST };
@@ -193,7 +254,7 @@ export function parseMenuChoice(text: string): MenuChoice | null {
 }
 
 export function readMenuStep(value: unknown): MenuStep | null {
-  const steps: MenuStep[] = ["menu", "menu_retry", "awaiting_1", "awaiting_1_type", "awaiting_1_urgency", "awaiting_1_zone", "awaiting_1_zone_retry", "awaiting_2", "awaiting_3", "awaiting_3_details", "awaiting_3_details_retry", "done"];
+  const steps: MenuStep[] = ["menu", "menu_retry", "awaiting_1", "awaiting_1_type", "awaiting_1_urgency", "awaiting_1_zone", "awaiting_1_zone_retry", "awaiting_1_confirm", "awaiting_2", "awaiting_3", "awaiting_3_details", "awaiting_3_details_retry", "awaiting_3_confirm", "done"];
 
   return typeof value === "string" && (steps as string[]).includes(value) ? (value as MenuStep) : null;
 }
@@ -235,6 +296,30 @@ function closing({
   return { replies, nextStep: "done", handoff: true };
 }
 
+/** Volta uma pergunta: a etapa anterior é repetida (ou o menu principal, se era a primeira). */
+function goBack(step: MenuStep | null): MenuDecision | null {
+  switch (step) {
+    case "awaiting_1":
+    case "awaiting_2":
+    case "awaiting_3":
+      return { replies: [MENU_WELCOME], nextStep: "menu", handoff: false, list: menuList() };
+    case "awaiting_1_type":
+      return { replies: [OPTION_REPLIES[1]], nextStep: "awaiting_1", handoff: false, list: WHO_LIST };
+    case "awaiting_1_urgency":
+      return { replies: [HELP_TEXT], nextStep: "awaiting_1_type", handoff: false, list: HELP_LIST };
+    case "awaiting_1_zone":
+    case "awaiting_1_zone_retry":
+    case "awaiting_1_confirm":
+      return { replies: [URGENCY_TEXT], nextStep: "awaiting_1_urgency", handoff: false, list: URGENCY_LIST };
+    case "awaiting_3_details":
+    case "awaiting_3_details_retry":
+    case "awaiting_3_confirm":
+      return { replies: [OPTION_REPLIES[3]], nextStep: "awaiting_3", handoff: false, list: EXPERIENCE_LIST };
+    default:
+      return null;
+  }
+}
+
 export function decideMenuReply({ lastStep, text, choiceId, night, recruitmentFormUrl }: DecideInput): MenuDecision {
   if (lastStep === "menu" || lastStep === "menu_retry") {
     const choice = (choiceId ? parseMenuChoice(choiceId) : null) ?? parseMenuChoice(text);
@@ -259,6 +344,14 @@ export function decideMenuReply({ lastStep, text, choiceId, night, recruitmentFo
     return closing({ night, choice: null });
   }
 
+  if (isBack(choiceId, text)) {
+    const back = goBack(lastStep);
+
+    if (back) {
+      return back;
+    }
+  }
+
   const other = isOther(choiceId, text);
 
   switch (lastStep) {
@@ -270,20 +363,45 @@ export function decideMenuReply({ lastStep, text, choiceId, night, recruitmentFo
       return other ? closing({ night, choice: null }) : { replies: [ASK_ZONE], nextStep: "awaiting_1_zone", handoff: false };
     case "awaiting_1_zone":
       return hasWords(text)
-        ? closing({ night, choice: 1 })
+        ? confirmation("awaiting_1_confirm", text)
         : { replies: [ASK_ZONE_AGAIN], nextStep: "awaiting_1_zone_retry", handoff: false };
     case "awaiting_1_zone_retry":
-      return closing({ night, choice: 1 });
+      return hasWords(text) ? confirmation("awaiting_1_confirm", text) : closing({ night, choice: 1 });
+    case "awaiting_1_confirm":
+      if (isYes(choiceId, text)) {
+        return closing({ night, choice: 1 });
+      }
+
+      if (isFix(choiceId, text)) {
+        return { replies: [ASK_ZONE], nextStep: "awaiting_1_zone", handoff: false };
+      }
+
+      // Escreveu outra localidade em vez de tocar: confirma a nova.
+      return hasWords(text)
+        ? confirmation("awaiting_1_confirm", text)
+        : { replies: [ASK_ZONE_AGAIN], nextStep: "awaiting_1_zone", handoff: false };
     case "awaiting_2":
       return closing({ night, choice: 2, courseName: other ? null : courseNameFromChoice(choiceId) });
     case "awaiting_3":
       return other ? closing({ night, choice: null }) : { replies: [ASK_CANDIDATE_DETAILS], nextStep: "awaiting_3_details", handoff: false };
     case "awaiting_3_details":
       return hasWords(text)
-        ? closing({ night, choice: 3, recruitmentFormUrl })
+        ? confirmation("awaiting_3_confirm", text)
         : { replies: [ASK_CANDIDATE_DETAILS_AGAIN], nextStep: "awaiting_3_details_retry", handoff: false };
     case "awaiting_3_details_retry":
-      return closing({ night, choice: 3, recruitmentFormUrl });
+      return hasWords(text) ? confirmation("awaiting_3_confirm", text) : closing({ night, choice: 3, recruitmentFormUrl });
+    case "awaiting_3_confirm":
+      if (isYes(choiceId, text)) {
+        return closing({ night, choice: 3, recruitmentFormUrl });
+      }
+
+      if (isFix(choiceId, text)) {
+        return { replies: [ASK_CANDIDATE_DETAILS], nextStep: "awaiting_3_details", handoff: false };
+      }
+
+      return hasWords(text)
+        ? confirmation("awaiting_3_confirm", text)
+        : { replies: [ASK_CANDIDATE_DETAILS_AGAIN], nextStep: "awaiting_3_details", handoff: false };
     default:
       return { replies: [MENU_WELCOME], nextStep: "menu", handoff: false, list: menuList() };
   }

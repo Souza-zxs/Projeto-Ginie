@@ -60,7 +60,8 @@ const CHOICE_LABELS: Record<string, string> = {
   e2: "Tenho formação",
   e3: "Experiência e formação",
   e4: "Ainda sem experiência",
-  other: "Outro"
+  other: "Outro",
+  back: "← Voltar"
 };
 
 const MENU_OPTION_LABELS: Record<string, string> = {
@@ -81,12 +82,61 @@ export function displayAnswer(question: string, answer: string) {
   return CHOICE_LABELS[key] ?? answer;
 }
 
+// Ao voltar, a resposta dada à pergunta que vai ser repetida deixa de valer.
+const DISCARDED_BY_BACK: Record<string, string> = {
+  awaiting_1: "Opção do menu",
+  awaiting_2: "Opção do menu",
+  awaiting_3: "Opção do menu",
+  awaiting_1_type: "Apoio para quem",
+  awaiting_1_urgency: "Tipo de apoio",
+  awaiting_1_zone: "Urgência",
+  awaiting_1_zone_retry: "Urgência",
+  awaiting_3_details: "Experiência ou formação",
+  awaiting_3_details_retry: "Experiência ou formação"
+};
+
+// Etapas de confirmação: o que a pessoa respondeu não vira "resposta" própria. O que vale é o
+// que o bot fez a seguir (a próxima mensagem dele): encaminhou (confirmou), repetiu a pergunta
+// (corrigiu), confirmou outro texto (escreveu outra) ou voltou uma pergunta.
+type ConfirmStep = { question: string; askAgain: string; backTo: string; backDiscards: string };
+
+const CONFIRM_STEPS: Record<string, ConfirmStep> = {
+  awaiting_1_confirm: {
+    question: "Localidade",
+    askAgain: "awaiting_1_zone",
+    backTo: "awaiting_1_urgency",
+    backDiscards: "Urgência"
+  },
+  awaiting_3_confirm: {
+    question: "Nome e zona",
+    askAgain: "awaiting_3_details",
+    backTo: "awaiting_3",
+    backDiscards: "Experiência ou formação"
+  }
+};
+
+function truncateFrom(answers: MenuAnswer[], question: string) {
+  const index = answers.map((item) => item.question).lastIndexOf(question);
+
+  if (index >= 0) {
+    answers.length = index;
+  }
+}
+
+function isBackAnswer(text: string) {
+  const letters = text.normalize("NFKD").replace(/[^\p{L}]/gu, "").toLowerCase();
+
+  return letters === "voltar" || letters === "back";
+}
+
 /** Respostas do cliente, em ordem, com a pergunta a que cada uma responde. */
 export function extractMenuAnswers(messages: MenuHistoryMessage[]): MenuAnswer[] {
   const answers: MenuAnswer[] = [];
   let pendingStep: string | null = null;
 
-  for (const message of messages) {
+  for (let position = 0; position < messages.length; position += 1) {
+    const message = messages[position];
+
     if (message.direction === "outbound") {
       // Mensagem manual da equipa não tem menu_step e não muda a pergunta pendente.
       if (message.menu_step) {
@@ -96,10 +146,34 @@ export function extractMenuAnswers(messages: MenuHistoryMessage[]): MenuAnswer[]
       continue;
     }
 
-    const question = pendingStep ? QUESTION_BY_STEP[pendingStep] : null;
     const text = (message.content ?? "").trim();
+    const confirmStep: ConfirmStep | undefined = pendingStep ? CONFIRM_STEPS[pendingStep] : undefined;
 
-    if (question && text) {
+    if (confirmStep) {
+      const nextStep = messages.slice(position + 1).find((item) => item.direction === "outbound" && item.menu_step)?.menu_step;
+
+      if (nextStep === confirmStep.askAgain) {
+        truncateFrom(answers, confirmStep.question);
+      } else if (nextStep === pendingStep && text) {
+        truncateFrom(answers, confirmStep.question);
+        answers.push({ question: confirmStep.question, answer: text });
+      } else if (nextStep === confirmStep.backTo) {
+        truncateFrom(answers, confirmStep.backDiscards);
+      }
+
+      continue;
+    }
+
+    const question = pendingStep ? QUESTION_BY_STEP[pendingStep] : null;
+
+    if (question && text && pendingStep && DISCARDED_BY_BACK[pendingStep] && isBackAnswer(text)) {
+      const discarded = DISCARDED_BY_BACK[pendingStep];
+      const index = answers.map((item) => item.question).lastIndexOf(discarded);
+
+      if (index >= 0) {
+        answers.length = index;
+      }
+    } else if (question && text) {
       answers.push({ question, answer: displayAnswer(question, text) });
     } else if (pendingStep === "done" && text) {
       answers.push({ question: "Depois do encaminhamento", answer: text });
@@ -109,19 +183,29 @@ export function extractMenuAnswers(messages: MenuHistoryMessage[]): MenuAnswer[]
   return answers;
 }
 
-/** Assunto escolhido: pelo caminho do menu (a etapa que o bot abriu depois da escolha). */
+/** Assunto escolhido: pelo caminho do menu; ao voltar ao menu principal, recomeça. */
 export function detectMenuTopic(messages: MenuHistoryMessage[]): MenuTopic | null {
-  const steps = new Set(messages.map((message) => message.menu_step).filter(Boolean));
+  let topic: MenuTopic | null = null;
+  let sawInbound = false;
 
-  if (steps.has("awaiting_1")) return "support";
-  if (steps.has("awaiting_2")) return "training";
-  if (steps.has("awaiting_3")) return "recruitment";
+  for (const message of messages) {
+    if (message.direction === "inbound") {
+      sawInbound = true;
+      continue;
+    }
 
-  // A opção 4 e o "outro" encerram sem abrir etapa própria: se o menu foi respondido e a
-  // conversa acabou, o assunto é "outro".
-  const menuAnswered = messages.some((message) => message.direction === "inbound") && steps.has("done") && steps.has("menu");
+    const step = message.menu_step;
 
-  return menuAnswered ? "other" : null;
+    if (!step) continue;
+
+    if (step === "menu") topic = null;
+    else if (step.startsWith("awaiting_1")) topic = "support";
+    else if (step.startsWith("awaiting_2")) topic = "training";
+    else if (step.startsWith("awaiting_3")) topic = "recruitment";
+    else if (step === "done" && topic === null && sawInbound) topic = "other";
+  }
+
+  return topic;
 }
 
 export type MenuProgress = "in_progress" | "handed_off" | "no_menu";

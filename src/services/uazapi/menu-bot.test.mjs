@@ -64,7 +64,7 @@ test("toque na lista (choiceId) vale mais que o texto do rótulo", () => {
   assert.equal(decision.nextStep, "awaiting_2");
 });
 
-test("apoio domiciliário: para quem, tipo, urgência, localidade e só então a equipa", () => {
+test("apoio domiciliário: para quem, tipo, urgência, localidade, confirmação e só então a equipa", () => {
   const type = decideMenuReply({ lastStep: "awaiting_1", text: "Pai ou mãe", choiceId: "w2", night: false });
 
   assert.equal(type.nextStep, "awaiting_1_type");
@@ -74,19 +74,49 @@ test("apoio domiciliário: para quem, tipo, urgência, localidade e só então a
   const urgency = decideMenuReply({ lastStep: "awaiting_1_type", text: "Higiene pessoal", choiceId: "h1", night: false });
 
   assert.equal(urgency.nextStep, "awaiting_1_urgency");
-  assert.equal(urgency.handoff, false);
   assert.ok(urgency.list.choices.some((row) => row.includes("|u1|")));
 
   const zone = decideMenuReply({ lastStep: "awaiting_1_urgency", text: "O quanto antes", choiceId: "u1", night: false });
 
   assert.equal(zone.nextStep, "awaiting_1_zone");
-  assert.equal(zone.handoff, false);
   assert.equal(zone.list, undefined);
   assert.match(zone.replies[0], /localidade/);
 
-  const done = decideMenuReply({ lastStep: "awaiting_1_zone", text: "Lisboa, Benfica", night: false });
+  const confirm = decideMenuReply({ lastStep: "awaiting_1_zone", text: "Lisboa, Benfica", night: false });
+
+  assert.equal(confirm.nextStep, "awaiting_1_confirm");
+  assert.equal(confirm.handoff, false);
+  assert.match(confirm.replies[0], /«Lisboa, Benfica»/);
+  assert.ok(confirm.list.choices.some((row) => row.startsWith("Sim, está certo|yes|")));
+  assert.ok(confirm.list.choices.some((row) => row.startsWith("Corrigir|fix|")));
+
+  const done = decideMenuReply({ lastStep: "awaiting_1_confirm", text: "Sim, está certo", choiceId: "yes", night: false });
 
   assert.deepEqual(done, { replies: [HANDOFF_DAY], nextStep: "done", handoff: true });
+});
+
+test("confirmar: 'corrigir' repete a pergunta; escrever outro local confirma o novo; texto sem sentido pede de novo", () => {
+  const fixTapped = decideMenuReply({ lastStep: "awaiting_1_confirm", text: "Corrigir", choiceId: "fix", night: false });
+  const fixTyped = decideMenuReply({ lastStep: "awaiting_1_confirm", text: "não, está errado", night: false });
+
+  assert.equal(fixTapped.nextStep, "awaiting_1_zone");
+  assert.equal(fixTyped.nextStep, "awaiting_1_zone");
+  assert.match(fixTapped.replies[0], /localidade/);
+
+  const other = decideMenuReply({ lastStep: "awaiting_1_confirm", text: "Porto", night: false });
+
+  assert.equal(other.nextStep, "awaiting_1_confirm");
+  assert.match(other.replies[0], /«Porto»/);
+  assert.equal(other.handoff, false);
+
+  const nonsense = decideMenuReply({ lastStep: "awaiting_1_confirm", text: "👍", night: false });
+
+  assert.equal(nonsense.nextStep, "awaiting_1_zone");
+  assert.equal(nonsense.handoff, false);
+
+  for (const text of ["sim", "Sim!", "confirmo", "certo", "ok"]) {
+    assert.equal(decideMenuReply({ lastStep: "awaiting_1_confirm", text, night: false }).handoff, true, text);
+  }
 });
 
 test("localidade sem palavras (emoji, número) é pedida de novo; na segunda falha vai para a equipa", () => {
@@ -101,20 +131,26 @@ test("localidade sem palavras (emoji, número) é pedida de novo; na segunda fal
   const ok = decideMenuReply({ lastStep: "awaiting_1_zone_retry", text: "Porto", night: false });
   const giveUp = decideMenuReply({ lastStep: "awaiting_1_zone_retry", text: "👍", night: false });
 
-  assert.equal(ok.handoff, true);
+  assert.equal(ok.nextStep, "awaiting_1_confirm");
+  assert.equal(ok.handoff, false);
   assert.equal(giveUp.handoff, true);
 });
 
-test("nome e zona da candidatura também são pedidos de novo quando vêm sem palavras", () => {
+test("nome e zona da candidatura: sem palavras pede de novo; com texto pede confirmação", () => {
   const again = decideMenuReply({ lastStep: "awaiting_3_details", text: "😀", night: false, recruitmentFormUrl: "https://x.pt" });
 
   assert.equal(again.nextStep, "awaiting_3_details_retry");
   assert.equal(again.handoff, false);
 
-  const done = decideMenuReply({ lastStep: "awaiting_3_details_retry", text: "Ana, Porto", night: false, recruitmentFormUrl: "https://x.pt" });
+  const confirm = decideMenuReply({ lastStep: "awaiting_3_details_retry", text: "Ana, Porto", night: false, recruitmentFormUrl: "https://x.pt" });
 
-  assert.equal(done.handoff, true);
-  assert.ok(done.replies[0].includes("https://x.pt"));
+  assert.equal(confirm.nextStep, "awaiting_3_confirm");
+  assert.equal(confirm.handoff, false);
+  assert.match(confirm.replies[0], /«Ana, Porto»/);
+
+  const giveUp = decideMenuReply({ lastStep: "awaiting_3_details_retry", text: "😀", night: false, recruitmentFormUrl: "https://x.pt" });
+
+  assert.equal(giveUp.handoff, true);
 });
 
 test("toda lista tem a linha Outro, e escolhê-la vai direto para o atendimento manual", () => {
@@ -176,16 +212,21 @@ test("resposta inválida repete o menu uma vez e depois passa para a equipa", ()
 
   assert.equal(recovered.nextStep, "awaiting_2");
 });
-test("candidatura: experiência, nome e zona; depois o formulário e a equipa (à noite, aviso noturno)", () => {
+test("candidatura: experiência, nome e zona, confirmação; depois o formulário e a equipa (à noite, aviso noturno)", () => {
   const url = "https://exemplo.pt/candidatura";
   const details = decideMenuReply({ lastStep: "awaiting_3", text: "Tenho experiência", choiceId: "e1", night: false, recruitmentFormUrl: url });
 
   assert.equal(details.nextStep, "awaiting_3_details");
   assert.equal(details.handoff, false);
 
-  const withForm = decideMenuReply({ lastStep: "awaiting_3_details", text: "Ana, Porto", night: false, recruitmentFormUrl: url });
-  const withoutForm = decideMenuReply({ lastStep: "awaiting_3_details", text: "Ana, Porto", night: false });
-  const atNight = decideMenuReply({ lastStep: "awaiting_3_details", text: "Ana, Porto", night: true, recruitmentFormUrl: url });
+  const confirm = decideMenuReply({ lastStep: "awaiting_3_details", text: "Ana, Porto", night: false, recruitmentFormUrl: url });
+
+  assert.equal(confirm.nextStep, "awaiting_3_confirm");
+
+  const withForm = decideMenuReply({ lastStep: "awaiting_3_confirm", text: "Sim", choiceId: "yes", night: false, recruitmentFormUrl: url });
+  const withoutForm = decideMenuReply({ lastStep: "awaiting_3_confirm", text: "sim", night: false });
+  const atNight = decideMenuReply({ lastStep: "awaiting_3_confirm", text: "sim", night: true, recruitmentFormUrl: url });
+  const fix = decideMenuReply({ lastStep: "awaiting_3_confirm", text: "Corrigir", choiceId: "fix", night: false });
 
   assert.equal(withForm.replies.length, 2);
   assert.ok(withForm.replies[0].includes(url));
@@ -193,6 +234,8 @@ test("candidatura: experiência, nome e zona; depois o formulário e a equipa (�
   assert.deepEqual(withoutForm.replies, [HANDOFF_DAY]);
   assert.equal(atNight.replies[1], HANDOFF_NIGHT);
   assert.equal(atNight.handoff, true);
+  assert.equal(fix.nextStep, "awaiting_3_details");
+  assert.equal(fix.handoff, false);
 });
 
 test("readMenuStep só aceita etapas conhecidas", () => {
@@ -203,4 +246,85 @@ test("readMenuStep só aceita etapas conhecidas", () => {
   assert.equal(readMenuStep("awaiting_4"), null);
   assert.equal(readMenuStep("x"), null);
   assert.equal(readMenuStep(undefined), null);
+});
+
+test("toda lista de opções tem a linha ← Voltar, e o texto avisa", () => {
+  const lists = [
+    decideMenuReply({ lastStep: "menu", text: "1", night: false }).list,
+    decideMenuReply({ lastStep: "menu", text: "2", night: false }).list,
+    decideMenuReply({ lastStep: "menu", text: "3", night: false }).list,
+    decideMenuReply({ lastStep: "awaiting_1", text: "x", choiceId: "w1", night: false }).list,
+    decideMenuReply({ lastStep: "awaiting_1_type", text: "x", choiceId: "h1", night: false }).list
+  ];
+
+  for (const list of lists) {
+    assert.ok(list.choices.some((row) => row.startsWith("← Voltar|back|")), list.text);
+    assert.match(list.text, /Voltar/);
+    assert.ok(list.choices.length <= 10);
+    assert.ok(list.choices.every((row) => row.split("|")[0].length <= 24), "título até 24 caracteres");
+  }
+});
+
+test("voltar repete a pergunta anterior em cada etapa (tocado ou digitado)", () => {
+  const expected = {
+    awaiting_1: "menu",
+    awaiting_2: "menu",
+    awaiting_3: "menu",
+    awaiting_1_type: "awaiting_1",
+    awaiting_1_urgency: "awaiting_1_type",
+    awaiting_1_zone: "awaiting_1_urgency",
+    awaiting_1_zone_retry: "awaiting_1_urgency",
+    awaiting_1_confirm: "awaiting_1_urgency",
+    awaiting_3_details: "awaiting_3",
+    awaiting_3_details_retry: "awaiting_3",
+    awaiting_3_confirm: "awaiting_3"
+  };
+
+  for (const [step, target] of Object.entries(expected)) {
+    for (const input of [{ text: "← Voltar", choiceId: "back" }, { text: "Voltar" }, { text: "voltar!" }]) {
+      const decision = decideMenuReply({ lastStep: step, night: false, ...input });
+
+      assert.equal(decision.nextStep, target, `${step} ${JSON.stringify(input)}`);
+      assert.equal(decision.handoff, false);
+    }
+  }
+});
+
+test("voltar refaz a pergunta com a lista certa e o texto de reserva", () => {
+  const toWho = decideMenuReply({ lastStep: "awaiting_1_type", text: "", choiceId: "back", night: false });
+
+  assert.deepEqual(toWho.replies, [OPTION_REPLIES[1]]);
+  assert.ok(toWho.list.choices.some((row) => row.includes("|w1|")));
+
+  const toUrgency = decideMenuReply({ lastStep: "awaiting_1_zone", text: "voltar", night: false });
+
+  assert.ok(toUrgency.list.choices.some((row) => row.includes("|u1|")));
+
+  const toMenu = decideMenuReply({ lastStep: "awaiting_2", text: "", choiceId: "back", night: false });
+
+  assert.deepEqual(toMenu.replies, [MENU_WELCOME]);
+  assert.equal(toMenu.list.choices.length, 4);
+});
+
+test("voltar tem prioridade sobre a validação de texto e sobre 'outro'", () => {
+  const zone = decideMenuReply({ lastStep: "awaiting_1_zone", text: "voltar", night: false });
+
+  assert.equal(zone.nextStep, "awaiting_1_urgency");
+  assert.equal(zone.handoff, false);
+});
+
+test("voltar sem etapa anterior (menu, encaminhado, sem estado) não quebra nem encaminha", () => {
+  for (const lastStep of ["menu", "menu_retry", "done", null]) {
+    const decision = decideMenuReply({ lastStep, text: "voltar", choiceId: "back", night: false });
+
+    assert.equal(decision.handoff, lastStep === "menu_retry", String(lastStep));
+  }
+});
+
+test("as perguntas de texto livre avisam que dá para escrever 'voltar'", () => {
+  const zone = decideMenuReply({ lastStep: "awaiting_1_urgency", text: "x", choiceId: "u1", night: false });
+  const details = decideMenuReply({ lastStep: "awaiting_3", text: "x", choiceId: "e1", night: false });
+
+  assert.match(zone.replies[0], /voltar/);
+  assert.match(details.replies[0], /voltar/);
 });

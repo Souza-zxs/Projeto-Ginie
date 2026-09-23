@@ -101,3 +101,107 @@ test("o mapa de rótulos cobre todas as linhas das listas do bot", () => {
     }
   }
 });
+
+test("ao voltar, a resposta anterior deixa de valer e só a nova conta", () => {
+  const messages = [
+    bot("menu"), client("Apoio domiciliário"),
+    bot("awaiting_1"), client("Pai ou mãe"),
+    bot("awaiting_1_type"), client("Higiene pessoal"),
+    bot("awaiting_1_urgency"), client("← Voltar"),
+    bot("awaiting_1_type"), client("Companhia"),
+    bot("awaiting_1_urgency"), client("O quanto antes"),
+    bot("awaiting_1_zone")
+  ];
+
+  assert.deepEqual(extractMenuAnswers(messages), [
+    { question: "Opção do menu", answer: "Apoio domiciliário" },
+    { question: "Apoio para quem", answer: "Pai ou mãe" },
+    { question: "Tipo de apoio", answer: "Companhia" },
+    { question: "Urgência", answer: "O quanto antes" }
+  ]);
+});
+
+test("voltar digitado, e voltar a partir da localidade (com nova tentativa no meio)", () => {
+  const messages = [
+    bot("awaiting_1_urgency"), client("u1"),
+    bot("awaiting_1_zone"), client("👍"),
+    bot("awaiting_1_zone_retry"), client("voltar"),
+    bot("awaiting_1_urgency"), client("u3"),
+    bot("awaiting_1_zone")
+  ];
+
+  assert.deepEqual(extractMenuAnswers(messages), [{ question: "Urgência", answer: "Só a informar-me" }]);
+});
+
+test("voltar do primeiro nível volta ao menu e o assunto recomeça", () => {
+  const messages = [
+    client("olá"), bot("menu"),
+    client("Formação"), bot("awaiting_2"),
+    client("← Voltar"), bot("menu"),
+    client("Candidatura"), bot("awaiting_3")
+  ];
+
+  assert.deepEqual(extractMenuAnswers(messages), [{ question: "Opção do menu", answer: "Candidatura" }]);
+  assert.equal(detectMenuTopic(messages), "recruitment");
+  assert.equal(detectMenuTopic(messages.slice(0, 6)), null);
+});
+
+test("digitar 'voltar' onde não há como voltar é só texto", () => {
+  const messages = [bot("menu"), client("voltar")];
+
+  assert.deepEqual(extractMenuAnswers(messages), [{ question: "Opção do menu", answer: "voltar" }]);
+});
+
+test("confirmação: 'sim' mantém a localidade e não vira resposta própria", () => {
+  const messages = [
+    bot("awaiting_1_zone"), client("Lisboa"),
+    bot("awaiting_1_confirm"), client("Sim, está certo"),
+    bot("done")
+  ];
+
+  assert.deepEqual(extractMenuAnswers(messages), [{ question: "Localidade", answer: "Lisboa" }]);
+});
+
+test("confirmação: 'corrigir' descarta a localidade; escrever outra confirma a nova", () => {
+  const corrected = [
+    bot("awaiting_1_zone"), client("Lisbo"),
+    bot("awaiting_1_confirm"), client("Corrigir"),
+    bot("awaiting_1_zone"), client("Lisboa"),
+    bot("awaiting_1_confirm"), client("Sim"),
+    bot("done")
+  ];
+
+  assert.deepEqual(extractMenuAnswers(corrected), [{ question: "Localidade", answer: "Lisboa" }]);
+
+  const typedNew = [
+    bot("awaiting_1_zone"), client("Lisbo"),
+    bot("awaiting_1_confirm"), client("Porto"),
+    bot("awaiting_1_confirm"), client("Sim"),
+    bot("done")
+  ];
+
+  assert.deepEqual(extractMenuAnswers(typedNew), [{ question: "Localidade", answer: "Porto" }]);
+});
+
+test("confirmação: voltar descarta a urgência e a localidade", () => {
+  const messages = [
+    bot("awaiting_1_urgency"), client("u1"),
+    bot("awaiting_1_zone"), client("Lisboa"),
+    bot("awaiting_1_confirm"), client("← Voltar"),
+    bot("awaiting_1_urgency")
+  ];
+
+  assert.deepEqual(extractMenuAnswers(messages), []);
+});
+
+test("confirmação do nome e zona da candidatura", () => {
+  const messages = [
+    bot("awaiting_3_details"), client("Ana"),
+    bot("awaiting_3_confirm"), client("Corrigir"),
+    bot("awaiting_3_details"), client("Ana Costa, Porto"),
+    bot("awaiting_3_confirm"), client("Sim"),
+    bot("done")
+  ];
+
+  assert.deepEqual(extractMenuAnswers(messages), [{ question: "Nome e zona", answer: "Ana Costa, Porto" }]);
+});
