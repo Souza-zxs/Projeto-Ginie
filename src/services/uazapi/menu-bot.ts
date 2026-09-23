@@ -11,7 +11,11 @@ export type MenuDecision = {
   nextStep: MenuStep;
   /** true: a conversa passa para a equipa (IA/bot desligados; aparece no Inbox). */
   handoff: boolean;
+  /** Presente quando a resposta é o menu: enviar como lista clicável (replies fica de reserva em texto). */
+  list?: MenuList;
 };
+
+export type MenuList = { text: string; listButton: string; choices: string[] };
 
 export const MENU_WELCOME = [
   "Olá! 👋 Obrigada pelo seu contacto e seja bem-vindo(a) à DAR+.",
@@ -22,6 +26,24 @@ export const MENU_WELCOME = [
   "4️⃣ Outro assunto",
   "Basta responder com o número (1, 2, 3 ou 4). 😊"
 ].join("\n");
+
+const MENU_LIST_INTRO =
+  "Olá! 👋 Obrigada pelo seu contacto e seja bem-vindo(a) à DAR+.\nPara podermos ajudar da melhor forma, toque no botão e escolha a opção que pretende:";
+
+const MENU_LIST_CHOICES = [
+  "Apoio domiciliário|1|Para mim ou para um familiar",
+  "Formação|2|Cursos e formação profissional em geriatria",
+  "Candidatura|3|Quero trabalhar na DAR+",
+  "Outro assunto|4"
+];
+
+function menuList(prefix?: string): MenuList {
+  return {
+    text: prefix ? `${prefix}\n\n${MENU_LIST_INTRO}` : MENU_LIST_INTRO,
+    listButton: "Ver opções",
+    choices: MENU_LIST_CHOICES
+  };
+}
 
 export const MENU_RETRY_PREFIX = "Desculpe, não consegui perceber a sua resposta.";
 
@@ -62,6 +84,8 @@ export function readMenuStep(value: unknown): MenuStep | null {
 }
 
 type DecideInput = {
+  /** ID do item tocado na lista (ex.: "2"); tem prioridade sobre o texto. */
+  choiceId?: string | null;
   /** menu_step da última mensagem enviada pelo bot nesta conversa (null = nunca houve). */
   lastStep: MenuStep | null;
   text: string;
@@ -82,16 +106,16 @@ function closing({ night, choice, recruitmentFormUrl }: { night: boolean; choice
   return { replies, nextStep: "done", handoff: true };
 }
 
-export function decideMenuReply({ lastStep, text, night, recruitmentFormUrl }: DecideInput): MenuDecision {
+export function decideMenuReply({ lastStep, text, choiceId, night, recruitmentFormUrl }: DecideInput): MenuDecision {
   if (lastStep === "menu" || lastStep === "menu_retry") {
-    const choice = parseMenuChoice(text);
+    const choice = (choiceId ? parseMenuChoice(choiceId) : null) ?? parseMenuChoice(text);
 
     if (choice) {
       return { replies: [OPTION_REPLIES[choice]], nextStep: `awaiting_${choice}` as MenuStep, handoff: false };
     }
 
     if (lastStep === "menu") {
-      return { replies: [`${MENU_RETRY_PREFIX}\n\n${MENU_WELCOME}`], nextStep: "menu_retry", handoff: false };
+      return { replies: [`${MENU_RETRY_PREFIX}\n\n${MENU_WELCOME}`], nextStep: "menu_retry", handoff: false, list: menuList(MENU_RETRY_PREFIX) };
     }
 
     return closing({ night, choice: null });
@@ -103,5 +127,5 @@ export function decideMenuReply({ lastStep, text, night, recruitmentFormUrl }: D
     return closing({ night, choice, recruitmentFormUrl });
   }
 
-  return { replies: [MENU_WELCOME], nextStep: "menu", handoff: false };
+  return { replies: [MENU_WELCOME], nextStep: "menu", handoff: false, list: menuList() };
 }

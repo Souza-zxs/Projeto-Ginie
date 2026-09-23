@@ -20,6 +20,8 @@ export type UazapiMessage = {
   isGroup?: boolean;
   wasSentByApi?: boolean;
   messageType?: string;
+  /** ID do item tocado numa lista/botão interativo (ex.: "2"). */
+  buttonOrListid?: string;
   hauzapp_cliente_id?: string;
   clienteID?: string;
   clienteId?: string;
@@ -49,6 +51,8 @@ export type ParsedUazapiWebhook =
       /** Dígitos do telefone como vieram (antes do "@"); normalizar com normalizePhone. */
       rawPhone: string;
       text: string;
+      /** ID do item escolhido numa lista/botão; null em mensagem de texto normal. */
+      choiceId: string | null;
       /** ID da mensagem no WhatsApp, usado para descartar reenvios do mesmo webhook. */
       externalMessageId: string | null;
       /** Token da instância que recebeu: identifica o número sem configuração manual. */
@@ -151,7 +155,8 @@ export function parseUazapiWebhook(payload: UazapiWebhookPayload): ParsedUazapiW
   }
 
   const legacyText = typeof payload.message === "string" ? payload.message : "";
-  const text = (message?.text ?? payload.text ?? legacyText ?? "").trim();
+  const choiceId = typeof message?.buttonOrListid === "string" && message.buttonOrListid.trim() ? message.buttonOrListid.trim() : null;
+  const text = (message?.text ?? payload.text ?? legacyText ?? "").trim() || (choiceId ?? "");
 
   if (!text) {
     return { kind: "ignored", reason: "empty_text" };
@@ -161,6 +166,7 @@ export function parseUazapiWebhook(payload: UazapiWebhookPayload): ParsedUazapiW
     kind: "message",
     rawPhone,
     text,
+    choiceId,
     externalMessageId: message?.messageid || message?.id || null,
     instanceToken: payload.token || null,
     instanceName: payload.instanceName || payload.instance || null,

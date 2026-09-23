@@ -168,6 +168,7 @@ async function handleIncomingMessage(
       organizationId,
       phone,
       text: message.text,
+      choiceId: message.choiceId,
       payload,
       instance: { token: message.instanceToken, name: message.instanceName },
       externalMessageId: message.externalMessageId,

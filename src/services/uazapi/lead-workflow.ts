@@ -11,7 +11,7 @@ import {
 import { getKnownLeadFacts, upsertLeadFromQualification } from "@/services/leads/workflow";
 import { isNightTime } from "@/lib/service-hours";
 import { decideMenuReply, readMenuStep } from "@/services/uazapi/menu-bot";
-import { sendUazapiMessage } from "@/services/uazapi/send-message";
+import { sendUazapiList, sendUazapiMessage } from "@/services/uazapi/send-message";
 
 type AgentConfig = {
   id: string;
@@ -33,6 +33,8 @@ type LeadMessageInput = {
   organizationId: string;
   phone: string;
   text: string;
+  /** ID do item tocado numa lista interativa (menu do bot). */
+  choiceId?: string | null;
   payload: unknown;
   /** Instância (número) que recebeu a mensagem; a resposta sai por ela. */
   instance?: UazapiInstanceRef;
@@ -47,6 +49,7 @@ export async function processUazapiLeadMessage({
   organizationId,
   phone,
   text,
+  choiceId,
   payload,
   instance,
   externalMessageId,
@@ -101,6 +104,7 @@ export async function processUazapiLeadMessage({
       contactId: contact.id,
       phone: normalizedPhone,
       text,
+      choiceId,
       instance
     });
   }
@@ -188,6 +192,7 @@ async function runMenuBot({
   contactId,
   phone,
   text,
+  choiceId,
   instance
 }: {
   supabase: SupabaseClient;
@@ -196,6 +201,7 @@ async function runMenuBot({
   contactId: string;
   phone: string;
   text: string;
+  choiceId?: string | null;
   instance?: UazapiInstanceRef;
 }) {
   // O estado do menu vive no payload da última mensagem que o bot enviou.
@@ -212,20 +218,35 @@ async function runMenuBot({
   const decision = decideMenuReply({
     lastStep: readMenuStep(lastOutbound?.payload?.menu_step),
     text,
+    choiceId,
     night: isNightTime(),
     recruitmentFormUrl: process.env.RECRUITMENT_FORM_URL || null
   });
   const uazapiConfig = await getUazapiIntegrationConfig(supabase, organizationId, instance);
 
+  const integrationConfig = {
+    baseUrl: configString(uazapiConfig, ["baseUrl", "base_url"], process.env.UAZAPI_BASE_URL) ?? undefined,
+    token: configString(uazapiConfig, ["token", "apiKey", "api_key"], process.env.UAZAPI_TOKEN) ?? undefined
+  };
+
   for (const reply of decision.replies) {
-    const result = await sendUazapiMessage({
-      phone,
-      text: reply,
-      integrationConfig: {
-        baseUrl: configString(uazapiConfig, ["baseUrl", "base_url"], process.env.UAZAPI_BASE_URL) ?? undefined,
-        token: configString(uazapiConfig, ["token", "apiKey", "api_key"], process.env.UAZAPI_TOKEN) ?? undefined
+    let result: unknown;
+    let sentAs = "text";
+
+    if (decision.list) {
+      // Lista clicável; se a Uazapi recusar (ou o aparelho não a suportar no envio), cai no
+      // menu numerado em texto, que a pessoa responde digitando.
+      try {
+        result = await sendUazapiList({ phone, ...decision.list, integrationConfig });
+        sentAs = "list";
+      } catch {
+        result = null;
       }
-    });
+    }
+
+    if (result === null || result === undefined) {
+      result = await sendUazapiMessage({ phone, text: reply, integrationConfig });
+    }
 
     await supabase.from("messages").insert({
       organization_id: organizationId,
@@ -236,7 +257,7 @@ async function runMenuBot({
       type: "text",
       content: reply,
       status: "sent",
-      payload: { menu_step: decision.nextStep, result }
+      payload: { menu_step: decision.nextStep, sent_as: sentAs, result }
     });
   }
 

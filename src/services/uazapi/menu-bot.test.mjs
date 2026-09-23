@@ -29,7 +29,11 @@ test("primeiro contacto (ou estado desconhecido) envia o menu", () => {
   for (const lastStep of [null, "done", readMenuStep("lixo")]) {
     const decision = decideMenuReply({ lastStep, text: "olá", night: false });
 
-    assert.deepEqual(decision, { replies: [MENU_WELCOME], nextStep: "menu", handoff: false });
+    assert.deepEqual(decision.replies, [MENU_WELCOME]);
+    assert.equal(decision.nextStep, "menu");
+    assert.equal(decision.handoff, false);
+    assert.equal(decision.list.choices.length, 4);
+    assert.match(decision.list.choices[1], /\|2\|/);
   }
 });
 
@@ -41,6 +45,13 @@ test("escolha válida responde a pergunta da opção e aguarda detalhes", () => 
     assert.equal(decision.nextStep, `awaiting_${choice}`);
     assert.equal(decision.handoff, false);
   }
+});
+
+test("toque na lista (choiceId) vale mais que o texto do rótulo", () => {
+  const decision = decideMenuReply({ lastStep: "menu", text: "Formação", choiceId: "2", night: false });
+
+  assert.equal(decision.nextStep, "awaiting_2");
+  assert.deepEqual(decision.replies, [OPTION_REPLIES[2]]);
 });
 
 test("opção 2 lista os cursos sem preços", () => {

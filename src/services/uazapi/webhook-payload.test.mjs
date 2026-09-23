@@ -30,12 +30,29 @@ test("lê o exemplo oficial da documentação", () => {
     kind: "message",
     rawPhone: "5511888888888",
     text: "Olá, preciso de ajuda.",
+    choiceId: null,
     externalMessageId: "MSG_EXEMPLO",
     instanceToken: "INSTANCE_TOKEN",
     instanceName: "Atendimento",
     senderName: "Contato de exemplo",
     hauzappClienteId: null
   });
+});
+
+test("toque numa lista traz o choiceId; sem texto, usa o id como texto", () => {
+  const withText = parseUazapiWebhook({
+    ...docExample,
+    message: { ...docExample.message, text: "Formação", buttonOrListid: "2" }
+  });
+  const withoutText = parseUazapiWebhook({
+    ...docExample,
+    message: { ...docExample.message, text: "", buttonOrListid: "3" }
+  });
+
+  assert.equal(withText.kind, "message");
+  assert.equal(withText.choiceId, "2");
+  assert.equal(withText.text, "Formação");
+  assert.equal(withoutText.text, "3");
 });
 
 test("número de Portugal", () => {
