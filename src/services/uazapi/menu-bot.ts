@@ -2,7 +2,15 @@
 // projeto) para ser testável sem o Next. O estado da conversa fica no `payload.menu_step`
 // da última mensagem enviada pelo bot, então não precisa de coluna nova no banco.
 
-export type MenuStep = "menu" | "menu_retry" | "awaiting_1" | "awaiting_2" | "awaiting_3" | "awaiting_4" | "done";
+export type MenuStep =
+  | "menu"
+  | "menu_retry"
+  | "awaiting_1"
+  | "awaiting_1_zone"
+  | "awaiting_2"
+  | "awaiting_3"
+  | "awaiting_3_details"
+  | "done";
 
 export type MenuChoice = 1 | 2 | 3 | 4;
 
@@ -45,10 +53,56 @@ function menuList(prefix?: string): MenuList {
   };
 }
 
+// Título de linha do WhatsApp aceita só 24 caracteres; o detalhe vai na descrição.
+const COURSES: Array<{ id: string; name: string; description: string }> = [
+  { id: "c1", name: "Técnico de Geriatria", description: "360º com Estágio · b-learning · 60h + 120h de estágio" },
+  { id: "c2", name: "Animação Sociocultural", description: "Com Idosos e Estágio · b-learning · 40h + 20h de prática" },
+  { id: "c3", name: "Gestão de ERPI, CD e SAD", description: "Gestão de ERPI, Centro de Dia e SAD · síncrono · 60h + 15h" },
+  { id: "c4", name: "Prevenção do Burnout", description: "No Cuidador de Idosos · assíncrono · 4h" },
+  { id: "c5", name: "Módulos avulsos", description: "Módulos soltos de alguns dos cursos" }
+];
+
+const COURSE_LIST: MenuList = {
+  text: "Obrigada pelo interesse na nossa formação! Toque no botão e escolha o curso que lhe interessa:",
+  listButton: "Ver cursos",
+  choices: COURSES.map((course) => `${course.name}|${course.id}|${course.description}`)
+};
+
+const HELP_LIST: MenuList = {
+  text: "Obrigada! Que tipo de apoio procura? Toque no botão e escolha a opção mais próxima:",
+  listButton: "Ver apoios",
+  choices: [
+    "Higiene pessoal|h1|Banho, vestir e cuidados de conforto",
+    "Refeições|h2|Preparar e apoiar nas refeições",
+    "Companhia|h3|Acompanhamento e conversa",
+    "Medicação|h4|Apoio na toma da medicação",
+    "Apoio doméstico|h5|Limpezas e tarefas da casa",
+    "Vários serviços|h6|Mais do que um tipo de apoio"
+  ]
+};
+
+const EXPERIENCE_LIST: MenuList = {
+  text: "Obrigada pelo interesse em trabalhar na DAR+! Tem experiência ou formação na área? Toque no botão e escolha:",
+  listButton: "Ver opções",
+  choices: [
+    "Tenho experiência|e1|Já trabalhei na área",
+    "Tenho formação|e2|Curso ou formação na área",
+    "Experiência e formação|e3|Tenho as duas",
+    "Ainda sem experiência|e4|Quero começar na área"
+  ]
+};
+
+const ASK_ZONE = "E em que zona reside a pessoa a apoiar?";
+const ASK_CANDIDATE_DETAILS = "Pode indicar-nos o seu nome e a zona onde reside?";
+
+function courseNameFromChoice(choiceId?: string | null) {
+  return COURSES.find((course) => course.id === choiceId)?.name ?? null;
+}
+
 export const MENU_RETRY_PREFIX = "Desculpe, não consegui perceber a sua resposta.";
 
-export const OPTION_REPLIES: Record<MenuChoice, string> = {
-  1: "Obrigada! Para percebermos a melhor resposta, pode indicar-nos a zona onde reside a pessoa a apoiar e que tipo de ajuda procura (higiene, refeições, companhia, medicação, apoio doméstico…)?",
+export const OPTION_REPLIES: Record<1 | 2 | 3, string> = {
+  1: "Obrigada! Que tipo de apoio procura (higiene pessoal, refeições, companhia, medicação, apoio doméstico ou vários serviços)?",
   2: [
     "Obrigada pelo interesse na nossa formação! Estes são os cursos disponíveis:",
     "• Técnico de Geriatria 360º com Estágio Prático: b-learning, 60h online + 120h de estágio",
@@ -57,9 +111,10 @@ export const OPTION_REPLIES: Record<MenuChoice, string> = {
     "• Prevenção do Burnout no Cuidador de Idosos: e-learning assíncrono, 4h",
     "Alguns cursos também têm módulos avulsos. Qual destes lhe interessa?"
   ].join("\n"),
-  3: "Obrigada pelo interesse em trabalhar na DAR+! Pode indicar-nos o seu nome, a zona onde reside e se tem experiência ou formação na área?",
-  4: "Com certeza. Descreva-nos brevemente o assunto e encaminharemos para a pessoa certa."
+  3: "Obrigada pelo interesse em trabalhar na DAR+! Tem experiência ou formação na área?"
 };
+
+const OPTION_LISTS: Record<1 | 2 | 3, MenuList> = { 1: HELP_LIST, 2: COURSE_LIST, 3: EXPERIENCE_LIST };
 
 export const HANDOFF_DAY = "Obrigada! Já passámos o seu pedido a um membro da nossa equipa, que dará seguimento assim que possível.";
 export const HANDOFF_NIGHT = "Recebemos o seu contacto. Será contactado por um membro da nossa equipa logo que possível.";
@@ -78,7 +133,7 @@ export function parseMenuChoice(text: string): MenuChoice | null {
 }
 
 export function readMenuStep(value: unknown): MenuStep | null {
-  const steps: MenuStep[] = ["menu", "menu_retry", "awaiting_1", "awaiting_2", "awaiting_3", "awaiting_4", "done"];
+  const steps: MenuStep[] = ["menu", "menu_retry", "awaiting_1", "awaiting_1_zone", "awaiting_2", "awaiting_3", "awaiting_3_details", "done"];
 
   return typeof value === "string" && (steps as string[]).includes(value) ? (value as MenuStep) : null;
 }
@@ -94,8 +149,22 @@ type DecideInput = {
   recruitmentFormUrl?: string | null;
 };
 
-function closing({ night, choice, recruitmentFormUrl }: { night: boolean; choice: MenuChoice | null; recruitmentFormUrl?: string | null }): MenuDecision {
+function closing({
+  night,
+  choice,
+  recruitmentFormUrl,
+  courseName
+}: {
+  night: boolean;
+  choice: MenuChoice | null;
+  recruitmentFormUrl?: string | null;
+  courseName?: string | null;
+}): MenuDecision {
   const replies: string[] = [];
+
+  if (choice === 2 && courseName) {
+    replies.push(`Obrigada pelo interesse em ${courseName}!`);
+  }
 
   if (choice === 3 && recruitmentFormUrl) {
     replies.push(`Obrigada! Para avançar com a sua candidatura, preencha por favor o nosso formulário: ${recruitmentFormUrl}`);
@@ -110,8 +179,17 @@ export function decideMenuReply({ lastStep, text, choiceId, night, recruitmentFo
   if (lastStep === "menu" || lastStep === "menu_retry") {
     const choice = (choiceId ? parseMenuChoice(choiceId) : null) ?? parseMenuChoice(text);
 
+    if (choice === 4) {
+      return closing({ night, choice });
+    }
+
     if (choice) {
-      return { replies: [OPTION_REPLIES[choice]], nextStep: `awaiting_${choice}` as MenuStep, handoff: false };
+      return {
+        replies: [OPTION_REPLIES[choice]],
+        nextStep: `awaiting_${choice}` as MenuStep,
+        handoff: false,
+        list: OPTION_LISTS[choice]
+      };
     }
 
     if (lastStep === "menu") {
@@ -121,11 +199,18 @@ export function decideMenuReply({ lastStep, text, choiceId, night, recruitmentFo
     return closing({ night, choice: null });
   }
 
-  if (lastStep && lastStep.startsWith("awaiting_")) {
-    const choice = Number(lastStep.slice("awaiting_".length)) as MenuChoice;
-
-    return closing({ night, choice, recruitmentFormUrl });
+  switch (lastStep) {
+    case "awaiting_1":
+      return { replies: [ASK_ZONE], nextStep: "awaiting_1_zone", handoff: false };
+    case "awaiting_1_zone":
+      return closing({ night, choice: 1 });
+    case "awaiting_2":
+      return closing({ night, choice: 2, courseName: courseNameFromChoice(choiceId) });
+    case "awaiting_3":
+      return { replies: [ASK_CANDIDATE_DETAILS], nextStep: "awaiting_3_details", handoff: false };
+    case "awaiting_3_details":
+      return closing({ night, choice: 3, recruitmentFormUrl });
+    default:
+      return { replies: [MENU_WELCOME], nextStep: "menu", handoff: false, list: menuList() };
   }
-
-  return { replies: [MENU_WELCOME], nextStep: "menu", handoff: false, list: menuList() };
 }

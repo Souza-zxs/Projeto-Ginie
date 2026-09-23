@@ -37,21 +37,55 @@ test("primeiro contacto (ou estado desconhecido) envia o menu", () => {
   }
 });
 
-test("escolha válida responde a pergunta da opção e aguarda detalhes", () => {
-  for (const choice of [1, 2, 3, 4]) {
+test("opções 1, 2 e 3 abrem uma lista de escolha e aguardam a resposta", () => {
+  for (const choice of [1, 2, 3]) {
     const decision = decideMenuReply({ lastStep: "menu", text: String(choice), night: false });
 
     assert.deepEqual(decision.replies, [OPTION_REPLIES[choice]]);
     assert.equal(decision.nextStep, `awaiting_${choice}`);
     assert.equal(decision.handoff, false);
+    assert.ok(decision.list.choices.length >= 4);
+    assert.ok(decision.list.choices.every((row) => row.split("|")[0].length <= 24), "título de linha até 24 caracteres");
+    assert.ok(decision.list.choices.every((row) => (row.split("|")[2] ?? "").length <= 72), "descrição até 72 caracteres");
   }
+});
+
+test("opção 4 (outro assunto) vai direto para a equipa", () => {
+  const day = decideMenuReply({ lastStep: "menu", text: "4", night: false });
+  const night = decideMenuReply({ lastStep: "menu", text: "Outro assunto", choiceId: "4", night: true });
+
+  assert.deepEqual(day, { replies: [HANDOFF_DAY], nextStep: "done", handoff: true });
+  assert.deepEqual(night, { replies: [HANDOFF_NIGHT], nextStep: "done", handoff: true });
 });
 
 test("toque na lista (choiceId) vale mais que o texto do rótulo", () => {
   const decision = decideMenuReply({ lastStep: "menu", text: "Formação", choiceId: "2", night: false });
 
   assert.equal(decision.nextStep, "awaiting_2");
-  assert.deepEqual(decision.replies, [OPTION_REPLIES[2]]);
+});
+
+test("apoio domiciliário: escolhe o tipo, informa a zona e passa para a equipa", () => {
+  const zone = decideMenuReply({ lastStep: "awaiting_1", text: "Higiene pessoal", choiceId: "h1", night: false });
+
+  assert.equal(zone.nextStep, "awaiting_1_zone");
+  assert.equal(zone.handoff, false);
+  assert.equal(zone.list, undefined);
+
+  const done = decideMenuReply({ lastStep: "awaiting_1_zone", text: "Lisboa, Benfica", night: false });
+
+  assert.deepEqual(done, { replies: [HANDOFF_DAY], nextStep: "done", handoff: true });
+});
+
+test("formação: escolher um curso cita o nome e passa para a equipa", () => {
+  const picked = decideMenuReply({ lastStep: "awaiting_2", text: "Técnico de Geriatria", choiceId: "c1", night: false });
+
+  assert.equal(picked.handoff, true);
+  assert.equal(picked.replies[0], "Obrigada pelo interesse em Técnico de Geriatria!");
+  assert.equal(picked.replies[1], HANDOFF_DAY);
+
+  const typed = decideMenuReply({ lastStep: "awaiting_2", text: "quero o de geriatria", night: false });
+
+  assert.deepEqual(typed.replies, [HANDOFF_DAY]);
 });
 
 test("opção 2 lista os cursos sem preços", () => {
@@ -78,29 +112,28 @@ test("resposta inválida repete o menu uma vez e depois passa para a equipa", ()
 
   assert.equal(recovered.nextStep, "awaiting_2");
 });
-
-test("depois dos detalhes passa para a equipa; à noite usa a mensagem de fora de horário", () => {
-  const day = decideMenuReply({ lastStep: "awaiting_1", text: "Lisboa, higiene", night: false });
-  const night = decideMenuReply({ lastStep: "awaiting_1", text: "Lisboa, higiene", night: true });
-
-  assert.deepEqual(day, { replies: [HANDOFF_DAY], nextStep: "done", handoff: true });
-  assert.deepEqual(night, { replies: [HANDOFF_NIGHT], nextStep: "done", handoff: true });
-});
-
-test("candidatura envia o formulário quando o link existe", () => {
+test("candidatura: experiência, nome e zona; depois o formulário e a equipa (à noite, aviso noturno)", () => {
   const url = "https://exemplo.pt/candidatura";
-  const withForm = decideMenuReply({ lastStep: "awaiting_3", text: "Ana, Porto, 2 anos", night: false, recruitmentFormUrl: url });
-  const withoutForm = decideMenuReply({ lastStep: "awaiting_3", text: "Ana, Porto, 2 anos", night: false });
-  const otherOption = decideMenuReply({ lastStep: "awaiting_4", text: "assunto", night: false, recruitmentFormUrl: url });
+  const details = decideMenuReply({ lastStep: "awaiting_3", text: "Tenho experiência", choiceId: "e1", night: false, recruitmentFormUrl: url });
+
+  assert.equal(details.nextStep, "awaiting_3_details");
+  assert.equal(details.handoff, false);
+
+  const withForm = decideMenuReply({ lastStep: "awaiting_3_details", text: "Ana, Porto", night: false, recruitmentFormUrl: url });
+  const withoutForm = decideMenuReply({ lastStep: "awaiting_3_details", text: "Ana, Porto", night: false });
+  const atNight = decideMenuReply({ lastStep: "awaiting_3_details", text: "Ana, Porto", night: true, recruitmentFormUrl: url });
 
   assert.equal(withForm.replies.length, 2);
   assert.ok(withForm.replies[0].includes(url));
+  assert.equal(withForm.replies[1], HANDOFF_DAY);
   assert.deepEqual(withoutForm.replies, [HANDOFF_DAY]);
-  assert.deepEqual(otherOption.replies, [HANDOFF_DAY]);
+  assert.equal(atNight.replies[1], HANDOFF_NIGHT);
+  assert.equal(atNight.handoff, true);
 });
 
 test("readMenuStep só aceita etapas conhecidas", () => {
-  assert.equal(readMenuStep("awaiting_2"), "awaiting_2");
+  assert.equal(readMenuStep("awaiting_1_zone"), "awaiting_1_zone");
+  assert.equal(readMenuStep("awaiting_4"), null);
   assert.equal(readMenuStep("x"), null);
   assert.equal(readMenuStep(undefined), null);
 });
