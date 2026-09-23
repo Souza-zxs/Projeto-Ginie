@@ -2,6 +2,8 @@ import { formatNowForAgent } from "@/lib/datetime";
 import { describeServicePeriod, getGreeting } from "@/lib/service-hours";
 import { AGENT_LANGUAGE_RULE } from "@/agents/locale";
 import { mergeKnownFacts, type KnownLeadFacts } from "@/agents/known-facts";
+import { buildGroundingText, isGroundedNumber, isGroundedText } from "@/agents/extraction-grounding";
+import { computeDeterministicScore, isDeterministicallyQualified } from "@/agents/qualification-score";
 import { enforceReplyGuardrails } from "@/agents/reply-guardrails";
 import { chatCompletion, hasLlmConfigured, resolveModel, type ChatMessage } from "@/lib/openai/chat";
 
@@ -278,16 +280,38 @@ function heuristicQualification(input: LeadAgentInput): LeadQualification {
 function normalizeQualification(value: Partial<LeadQualification>, input: LeadAgentInput) {
   const fallback = heuristicQualification(input);
 
+  // O modelo (3B, CPU) às vezes preenche campos obrigatórios do JSON com um "chute
+  // plausível" em vez de admitir que não sabe — observado com uma mensagem só ("olá"),
+  // devolveu interest="apoio domiciliário" e region="Lisboa" do nada. Descarta o que não
+  // aparece no que a pessoa realmente escreveu (nem já era conhecido de antes), antes de
+  // mesclar: sem isso, o dado inventado viraria "known" e contaminaria os turnos seguintes.
+  const groundingText = buildGroundingText(input.messages);
+  const grounded: Partial<LeadQualification> = {
+    ...value,
+    interest: isGroundedText(value.interest, groundingText, input.known?.interest) ? value.interest : null,
+    region: isGroundedText(value.region, groundingText, input.known?.region) ? value.region : null,
+    paymentMethod: isGroundedText(value.paymentMethod, groundingText, input.known?.paymentMethod)
+      ? value.paymentMethod
+      : null,
+    urgency: isGroundedText(value.urgency, groundingText, input.known?.urgency) ? value.urgency : null,
+    budget: isGroundedNumber(value.budget, groundingText, input.known?.budget) ? value.budget : null
+  };
+  const facts = mergeKnownFacts(grounded, input.known, fallback);
+
+  // Pelo mesmo motivo, o score/qualificado não vêm do que o modelo "acha": são
+  // calculados a partir dos fatos que sobraram depois da checagem acima.
+  const wantsVisit = Boolean(value.wantsVisit ?? fallback.wantsVisit);
+  const score = computeDeterministicScore(facts);
+
   return {
     ...fallback,
     ...value,
+    ...grounded,
     phone: input.contact.phone,
-    // Se o modelo devolveu null de novo para algo que já sabíamos (por não ter
-    // reextraído do histórico), mantém o que já estava salvo em vez de apagar.
-    ...mergeKnownFacts(value, input.known, fallback),
-    score: Math.max(0, Math.min(100, Number(value.score ?? fallback.score))),
-    qualified: Boolean(value.qualified ?? fallback.qualified),
-    wantsVisit: Boolean(value.wantsVisit ?? fallback.wantsVisit),
+    ...facts,
+    score,
+    qualified: isDeterministicallyQualified(score, wantsVisit),
+    wantsVisit,
     visitDatePreference: value.visitDatePreference ?? fallback.visitDatePreference
   };
 }
