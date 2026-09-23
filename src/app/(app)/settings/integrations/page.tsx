@@ -12,6 +12,7 @@ import {
   saveUazapiIntegrationAction,
   toggleUazapiIntegrationAction
 } from "./actions";
+import { UazapiConnection } from "./uazapi-connection";
 
 type IntegrationRow = {
   id: string;
@@ -54,6 +55,8 @@ export default async function IntegrationsPage() {
   const leadAgents = (agents ?? []).filter((agent) => agent.agent_type === "lead_meta");
   const agentNameById = new Map((agents ?? []).map((agent) => [agent.id, agent.name]));
   const uazapiWebhookUrl = await getUazapiWebhookUrl();
+  // Conectar/desconectar número só para admin e gestor (o QR code dá acesso à linha).
+  const canManageConnections = profile?.role === "admin" || profile?.role === "manager";
 
   return (
     <>
@@ -162,15 +165,24 @@ export default async function IntegrationsPage() {
             </p>
           )}
 
+          {canManageConnections && uazapiConnections.length ? (
+            <div className="space-y-3">
+              <p className="text-sm font-semibold text-slate-950">Conectar números</p>
+              {uazapiConnections.map((connection) => (
+                <UazapiConnection key={connection.id} integrationId={connection.id} name={connection.name} />
+              ))}
+            </div>
+          ) : null}
+
           <div className="rounded-md border bg-muted/40 p-3 text-sm text-muted-foreground">
-            Webhook para configurar em <b>cada</b> instância na Uazapi (o mesmo endereço serve para todas),
-            com o evento <b>messages</b>:
+            Ao clicar em <b>Conectar</b>, o sistema já aponta o webhook da instância para cá. Não configure
+            também o &quot;Webhook Global&quot; no painel da Uazapi: com os dois, cada mensagem chega duas
+            vezes. Se precisar configurar à mão, o endereço é:
             <div className="mt-2 break-all rounded-md bg-white px-3 py-2 font-mono text-xs text-slate-700">
               {uazapiWebhookUrl}
             </div>
             <p className="mt-2">
-              Troque <b>SEU_UAZAPI_WEBHOOK_SECRET</b> pelo valor de <code>UAZAPI_WEBHOOK_SECRET</code> do
-              servidor. Cada número é reconhecido automaticamente pelo token da instância, então o
+              Cada número é reconhecido automaticamente pelo token da instância, então o
               &quot;Instance ID&quot; abaixo é opcional. Para conferir o que chegou, veja{" "}
               <Link href={"/settings/logs" as Route} className="font-semibold text-primary">
                 Configurações &gt; Logs
