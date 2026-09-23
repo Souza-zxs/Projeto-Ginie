@@ -7,7 +7,7 @@ import {
   getUazapiIntegrationConfig,
   type UazapiInstanceRef
 } from "@/services/integrations/config";
-import { upsertLeadFromQualification } from "@/services/leads/workflow";
+import { getKnownLeadFacts, upsertLeadFromQualification } from "@/services/leads/workflow";
 import { sendUazapiMessage } from "@/services/uazapi/send-message";
 
 type AgentConfig = {
@@ -90,12 +90,14 @@ export async function processUazapiLeadMessage({
     .limit(30)
     .returns<Array<{ direction: "inbound" | "outbound"; content: string | null }>>();
   const messages = [...(recentMessages ?? [])].reverse();
+  const known = await getKnownLeadFacts(supabase, organizationId, conversation.id);
 
   const qualification = await runLeadAgent({
     contact: {
       name: contact.name,
       phone: normalizedPhone
     },
+    known,
     campaign: {
       property_description:
         "Pessoa que contactou a DAR+ pelo WhatsApp. Percebe a necessidade, qualifica e, quando fizer sentido, conduz para o passo seguinte.",

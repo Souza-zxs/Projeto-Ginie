@@ -14,7 +14,7 @@ import {
   parseSlotChoice
 } from "@/services/calendar/slots";
 import { scheduleLeadFollowups } from "@/services/followups/lead-followups";
-import { upsertLeadFromQualification } from "@/services/leads/workflow";
+import { getKnownLeadFacts, upsertLeadFromQualification } from "@/services/leads/workflow";
 import { enqueueHumanizedMetaMessages } from "@/services/messaging/enqueue-humanized";
 import { createAdminClient } from "@/lib/supabase/admin";
 
@@ -480,11 +480,14 @@ async function respondWithAgent({
     }
   }
 
+  const known = await getKnownLeadFacts(supabase, organizationId, conversationId);
+
   const qualification = await runLeadAgent({
     contact: {
       name: contact.name,
       phone: contact.phone
     },
+    known,
     campaign: campaign
       ? {
           ...campaign,

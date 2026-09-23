@@ -1,5 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import type { LeadQualification } from "@/agents/lead-agent";
+import type { KnownLeadFacts, LeadQualification } from "@/agents/lead-agent";
 import { renderTemplate } from "@/lib/templates";
 import { scheduleBrokerAssignmentSla } from "@/services/broker-sla/workflow";
 import { configString, getActiveIntegrationConfig } from "@/services/integrations/config";
@@ -26,6 +26,30 @@ type BrokerAgent = {
   broker_message_template: string | null;
   broker_followup_minutes: number;
 };
+
+/**
+ * O que já foi extraído desta conversa em turnos anteriores (tabela leads), para o
+ * agente não ter de deduzir de novo do histórico de texto — e não repetir pergunta já
+ * respondida. Sem lead ainda criado (primeira mensagem), devolve null.
+ */
+export async function getKnownLeadFacts(
+  supabase: SupabaseClient,
+  organizationId: string,
+  conversationId: string
+): Promise<KnownLeadFacts | null> {
+  const { data } = await supabase
+    .from("leads")
+    .select("interest, region, budget, payment_method")
+    .eq("organization_id", organizationId)
+    .eq("conversation_id", conversationId)
+    .maybeSingle<{ interest: string | null; region: string | null; budget: number | null; payment_method: string | null }>();
+
+  if (!data) {
+    return null;
+  }
+
+  return { interest: data.interest, region: data.region, budget: data.budget, paymentMethod: data.payment_method };
+}
 
 export async function upsertLeadFromQualification({
   supabase,
