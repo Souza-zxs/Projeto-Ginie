@@ -1,6 +1,6 @@
 import Link from "next/link";
 import type { Route } from "next";
-import { Bot, Building2, ClipboardList, MessageSquareText, Plug, Smartphone } from "lucide-react";
+import { Bot, Building2, ClipboardList, MessageSquareText, PhoneOff, Plug, Smartphone } from "lucide-react";
 import { PageHeader } from "@/components/page-header";
 
 const settingsLinks: Array<{
@@ -32,6 +32,12 @@ const settingsLinks: Array<{
     title: "Agentes IA",
     description: "Editar prompts, materiais, humanização e agente de equipe.",
     icon: Bot
+  },
+  {
+    href: "/settings/ignored-numbers" as Route,
+    title: "Números ignorados",
+    description: "Números que a IA não atende: as mensagens deles são ignoradas.",
+    icon: PhoneOff
   },
   {
     href: "/settings/followups" as Route,

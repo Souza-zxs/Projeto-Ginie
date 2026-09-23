@@ -33,3 +33,40 @@ export function normalizePhone(value: unknown): string | null {
 
   return null;
 }
+
+/**
+ * Lê uma lista colada (um número por linha, ou separados por vírgula/ponto e vírgula),
+ * normaliza cada um e separa os válidos (sem repetição) dos que não foram reconhecidos.
+ */
+export function parsePhoneList(text: string) {
+  const valid = new Set<string>();
+  const invalid: string[] = [];
+
+  for (const raw of text.split(/[\n,;]+/)) {
+    const entry = raw.trim();
+    if (!entry) continue;
+
+    const phone = normalizePhone(entry);
+    if (phone) {
+      valid.add(phone);
+    } else {
+      invalid.push(entry);
+    }
+  }
+
+  return { valid: [...valid], invalid };
+}
+
+/** Exibição legível: +351 937 513 951 (Portugal) ou +55 83 99999-9999 (Brasil). */
+export function formatPhoneForDisplay(phone: string) {
+  if (/^351\d{9}$/.test(phone)) {
+    return `+351 ${phone.slice(3, 6)} ${phone.slice(6, 9)} ${phone.slice(9)}`;
+  }
+
+  if (/^55\d{10,11}$/.test(phone)) {
+    const local = phone.slice(4);
+    return `+55 ${phone.slice(2, 4)} ${local.slice(0, -4)}-${local.slice(-4)}`;
+  }
+
+  return `+${phone}`;
+}

@@ -2,6 +2,7 @@ import { after, NextResponse } from "next/server";
 import { normalizePhone } from "@/lib/phone";
 import { scheduleBrokerProgressChecks } from "@/services/broker-sla/workflow";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { isIgnoredPhone } from "@/services/contacts/ignored-numbers";
 import { findUazapiOrganizationByToken } from "@/services/integrations/config";
 import { processUazapiLeadMessage } from "@/services/uazapi/lead-workflow";
 import {
@@ -104,6 +105,14 @@ async function handleIncomingMessage(
   phone: string,
   payload: UazapiWebhookPayload
 ) {
+  const tokenOrganizationId = await findUazapiOrganizationByToken(supabase, message.instanceToken);
+
+  // Números da lista de ignorados (Configurações > Números ignorados): descarta sem gravar
+  // nada, nem no Inbox nem nos logs. Pedido explícito do cliente.
+  if (await isIgnoredPhone(supabase, phone, tokenOrganizationId)) {
+    return;
+  }
+
   const { data: broker } = await supabase
     .from("brokers")
     .select("id, organization_id")
@@ -148,9 +157,7 @@ async function handleIncomingMessage(
 
   if (!broker) {
     // Quem recebeu é a instância dona do token; só sem ela cai nas heurísticas antigas.
-    const organizationId =
-      (await findUazapiOrganizationByToken(supabase, message.instanceToken)) ??
-      (await resolveLeadOrganization(supabase, phone));
+    const organizationId = tokenOrganizationId ?? (await resolveLeadOrganization(supabase, phone));
 
     if (!organizationId) {
       return;
