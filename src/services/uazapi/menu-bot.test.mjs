@@ -43,6 +43,14 @@ test("escolha válida responde a pergunta da opção e aguarda detalhes", () => 
   }
 });
 
+test("opção 2 lista os cursos sem preços", () => {
+  const text = OPTION_REPLIES[2];
+
+  assert.match(text, /Técnico de Geriatria/);
+  assert.match(text, /Prevenção do Burnout/);
+  assert.doesNotMatch(text, /€/);
+});
+
 test("resposta inválida repete o menu uma vez e depois passa para a equipa", () => {
   const first = decideMenuReply({ lastStep: "menu", text: "bom dia, queria saber preços", night: false });
 

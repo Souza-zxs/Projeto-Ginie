@@ -27,7 +27,14 @@ export const MENU_RETRY_PREFIX = "Desculpe, não consegui perceber a sua respost
 
 export const OPTION_REPLIES: Record<MenuChoice, string> = {
   1: "Obrigada! Para percebermos a melhor resposta, pode indicar-nos a zona onde reside a pessoa a apoiar e que tipo de ajuda procura (higiene, refeições, companhia, medicação, apoio doméstico…)?",
-  2: "Obrigada pelo interesse na nossa formação! Que curso ou área procura? Se preferir, podemos enviar-lhe a lista de cursos disponíveis.",
+  2: [
+    "Obrigada pelo interesse na nossa formação! Estes são os cursos disponíveis:",
+    "• Técnico de Geriatria 360º com Estágio Prático: b-learning, 60h online + 120h de estágio",
+    "• Animação Sociocultural com Idosos com Estágio Prático: b-learning, 40h online + 20h de prática",
+    "• Gestão de ERPI, Centro de Dia e SAD: e-learning síncrono, 60h de aulas ao vivo + 15h de projeto final",
+    "• Prevenção do Burnout no Cuidador de Idosos: e-learning assíncrono, 4h",
+    "Alguns cursos também têm módulos avulsos. Qual destes lhe interessa?"
+  ].join("\n"),
   3: "Obrigada pelo interesse em trabalhar na DAR+! Pode indicar-nos o seu nome, a zona onde reside e se tem experiência ou formação na área?",
   4: "Com certeza. Descreva-nos brevemente o assunto e encaminharemos para a pessoa certa."
 };
