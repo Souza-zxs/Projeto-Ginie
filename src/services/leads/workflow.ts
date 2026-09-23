@@ -228,12 +228,12 @@ export async function sendQualifiedLeadToBroker({
 
   const message = renderTemplate(
     brokerAgent?.broker_message_template ||
-      `Ola, {{broker_name}}. Voce recebeu o lead {{lead_name}}.
+      `Olá, {{broker_name}}. Tem um novo contacto: {{lead_name}}.
 
 Resumo:
 {{summary}}
 
-Responda aqui com o status do atendimento.`,
+Responda aqui com o ponto de situação do atendimento.`,
     {
       broker_name: broker.name,
       broker_phone: broker.phone,

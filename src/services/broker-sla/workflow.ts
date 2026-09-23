@@ -125,7 +125,7 @@ export async function processBrokerInitialCheck(supabase: SupabaseClient, job: J
     return markDone(supabase, job.id, "cancelled", "broker_already_responded");
   }
 
-  await notifyBroker(supabase, context, `Ola, {{broker_name}}. Voce conseguiu iniciar o atendimento do lead {{lead_name}}?\n\nResumo: {{summary}}\n\nMe responda aqui como foi o primeiro contato.`);
+  await notifyBroker(supabase, context, `Olá, {{broker_name}}. Já conseguiu iniciar o atendimento de {{lead_name}}?\n\nResumo: {{summary}}\n\nResponda aqui como correu o primeiro contacto.`);
   await supabase.from("broker_assignments").update({ first_check_sent_at: new Date().toISOString() }).eq("id", context.id);
   return markDone(supabase, job.id, "done", "broker_checked");
 }
@@ -261,7 +261,7 @@ export async function processAppointmentReminder(supabase: SupabaseClient, job: 
   const phone = appointment.contacts?.phone || appointment.leads?.phone;
   if (phone) {
     const when = formatVisitDateTime(appointment.starts_at);
-    await sendMetaMessage({ phone, text: `Olá, passando para confirmar a sua visita em ${when}. Está tudo certo?` });
+    await sendMetaMessage({ phone, text: `Olá. Recordamos a sua visita marcada para ${when}. Está tudo bem para si?` });
   }
   await supabase.from("appointments").update({ reminder_sent_at: new Date().toISOString() }).eq("id", appointment.id);
   return markDone(supabase, job.id, "done", "appointment_reminded");
@@ -295,7 +295,7 @@ export async function processAppointmentPostVisitCheck(supabase: SupabaseClient,
     const config = await getActiveIntegrationConfig(supabase, appointment.organization_id, "uazapi");
     await sendUazapiMessage({
       phone: assignment.brokers.phone,
-      text: `Ola, ${assignment.brokers.name}. Como foi a visita do lead ${assignment.leads?.name ?? assignment.leads?.phone ?? ""}? Teve proposta ou proximo passo?`,
+      text: `Olá, ${assignment.brokers.name}. Como correu a visita de ${assignment.leads?.name ?? assignment.leads?.phone ?? ""}? Houve proposta ou próximo passo?`,
       integrationConfig: {
         baseUrl: configString(config, ["baseUrl", "base_url"], process.env.UAZAPI_BASE_URL) ?? undefined,
         token: configString(config, ["token", "apiKey", "api_key"], process.env.UAZAPI_TOKEN) ?? undefined
@@ -376,7 +376,7 @@ export async function processAppointmentPostVisitFollowup(supabase: SupabaseClie
     const config = await getActiveIntegrationConfig(supabase, appointment.organization_id, "uazapi");
     await sendUazapiMessage({
       phone: assignment.brokers.phone,
-      text: `Ola, ${assignment.brokers.name}. Ainda preciso da atualizacao da visita do lead ${assignment.leads?.name ?? assignment.leads?.phone ?? ""}. Teve proposta, negociacao ou proximo passo?`,
+      text: `Olá, ${assignment.brokers.name}. Ainda preciso do ponto de situação da visita de ${assignment.leads?.name ?? assignment.leads?.phone ?? ""}. Houve proposta, negociação ou próximo passo?`,
       integrationConfig: {
         baseUrl: configString(config, ["baseUrl", "base_url"], process.env.UAZAPI_BASE_URL) ?? undefined,
         token: configString(config, ["token", "apiKey", "api_key"], process.env.UAZAPI_TOKEN) ?? undefined
@@ -585,11 +585,11 @@ function isVisitOrLater(stage?: string | null) {
 function buildProgressMessage(stage: string, hasAppointment: boolean) {
   if (stage === "visit" || stage === "visita") {
     return hasAppointment
-      ? `Ola, {{broker_name}}. A visita do lead {{lead_name}} esta no radar.\n\nDepois me atualize se gerou proposta ou negociacao.`
-      : `Ola, {{broker_name}}. O lead {{lead_name}} esta na etapa de visita.\n\nPara quando ficou agendada a visita? Me responda com data e horario para eu acompanhar.`;
+      ? `Olá, {{broker_name}}. A visita de {{lead_name}} está registada.\n\nDepois diga-me se resultou em proposta ou negociação.`
+      : `Olá, {{broker_name}}. {{lead_name}} está na etapa de visita.\n\nPara quando ficou marcada a visita? Responda com a data e a hora para eu acompanhar.`;
   }
 
-  return `Ola, {{broker_name}}. Como esta o atendimento do lead {{lead_name}}?\n\nTeve visita, proposta ou alguma atualizacao de funil? Me responda aqui para eu atualizar o sistema.`;
+  return `Olá, {{broker_name}}. Como está o atendimento de {{lead_name}}?\n\nHouve visita, proposta ou alguma novidade? Responda aqui para eu atualizar o sistema.`;
 }
 
 async function schedulePostVisitFollowup({

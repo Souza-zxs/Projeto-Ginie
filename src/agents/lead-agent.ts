@@ -1,5 +1,6 @@
 import { formatNowForAgent } from "@/lib/datetime";
-import { describeServicePeriod } from "@/lib/service-hours";
+import { describeServicePeriod, getGreeting } from "@/lib/service-hours";
+import { AGENT_LANGUAGE_RULE } from "@/agents/locale";
 import { chatCompletion, hasLlmConfigured, resolveModel, type ChatMessage } from "@/lib/openai/chat";
 
 export type LeadQualification = {
@@ -57,42 +58,44 @@ export async function runLeadAgent(input: LeadAgentInput): Promise<LeadQualifica
   try {
     const systemPrompt = [
       input.agent?.system_prompt ||
-        "Voce e um consultor da DAR+ Servicos e Formacao. Responda curto, qualifique o lead e devolva JSON valido.",
+        "És um consultor da DAR+. Responde de forma curta, qualifica o contacto e devolve JSON válido.",
+      "",
+      AGENT_LANGUAGE_RULE,
       "",
       "Regras de ritmo para a resposta em reply:",
       input.agent?.greeting_template
         ? `Saudação preferida para resposta curta: ${input.agent.greeting_template}`
         : "",
-      "- Se a última mensagem for só um cumprimento, responda com o cumprimento indicado em `periodo` e uma pergunta curta.",
-      "- Uma pergunta por mensagem; não empilhe perguntas de qualificação.",
+      "- Se a última mensagem for só um cumprimento, responde com o cumprimento indicado em `periodo` e uma pergunta curta.",
+      "- Uma pergunta por mensagem; não acumules perguntas de qualificação.",
       "- Sem pontuação exagerada nem excesso de pontos de exclamação.",
       input.agent?.humanization_rules
-        ? `Humanizacao configurada:\n${input.agent.humanization_rules}`
+        ? `Tom e humanização:\n${input.agent.humanization_rules}`
         : "",
       input.agent?.forbidden_phrases
         ? `Frases proibidas:\n${input.agent.forbidden_phrases}`
         : "",
       input.agent?.conversation_examples
-        ? `Exemplos bons:\n${input.agent.conversation_examples}`
+        ? `Bons exemplos:\n${input.agent.conversation_examples}`
         : "",
-      input.agent?.agent_skills ? `Skills do agente:\n${input.agent.agent_skills}` : "",
+      input.agent?.agent_skills ? `Conhecimento do agente:\n${input.agent.agent_skills}` : "",
       input.agent?.qualification_criteria
-        ? `Criterios de qualificacao: ${input.agent.qualification_criteria}`
+        ? `Critérios de qualificação: ${input.agent.qualification_criteria}`
         : "",
       input.agent?.handoff_instructions
         ? `Encaminhamento: ${input.agent.handoff_instructions}`
         : "",
-      "- Mesmo devolvendo JSON, o campo reply deve soar como WhatsApp humano e natural.",
+      "- Mesmo a devolver JSON, o campo reply deve soar como uma mensagem de WhatsApp natural, escrita por uma pessoa.",
       "",
       // Este texto e o período vão em partes diferentes de propósito: o system fica idêntico
       // entre chamadas (o Ollama reaproveita o cache do prompt) e só `now`/`periodo`, no fim
       // da mensagem do usuário, mudam.
-      "O campo `now` traz a data e hora de Portugal, e `periodo` diz se está dentro ou fora do horário de atendimento e qual cumprimento usar. Siga `periodo`: ele já está calculado, não refaça a conta.",
+      "O campo `now` traz a data e a hora de Portugal, e `periodo` diz se estamos dentro ou fora do horário de atendimento e que cumprimento usar. Segue `periodo`: já está calculado, não refaças a conta.",
       "",
-      "Responda SOMENTE com um objeto JSON valido, sem texto antes ou depois, sem blocos de codigo.",
-      "Campos obrigatorios: name, phone, interest, region, budget, paymentMethod, urgency,",
+      "Responde SÓ com um objeto JSON válido, sem texto antes ou depois e sem blocos de código.",
+      "Campos obrigatórios: name, phone, interest, region, budget, paymentMethod, urgency,",
       "intention (um de: novo_servico | contrato_recorrente | formacao | indefinido),",
-      "qualificationStatus, stage, score (0-100), summary, qualified (bool), wantsVisit (bool),",
+      "qualificationStatus, stage, score (0-100), summary (em português de Portugal), qualified (bool), wantsVisit (bool),",
       "visitDatePreference, reply."
     ]
       .filter(Boolean)
@@ -230,17 +233,18 @@ function heuristicQualification(input: LeadAgentInput): LeadQualification {
     stage: qualified ? "qualified" : "qualifying",
     score,
     summary: inboundText
-      ? `Lead respondeu: ${inboundText.slice(0, 220)}`
-      : "Lead ainda com poucas informacoes estruturadas.",
+      ? `O contacto escreveu: ${inboundText.slice(0, 220)}`
+      : "Contacto ainda com pouca informação.",
     qualified,
     wantsVisit,
     visitDatePreference: extractVisitPreference(inboundText),
+    // Respostas de reserva, usadas só quando o modelo falha. Vão direto para o cliente,
+    // por isso em português de Portugal e sem prometer nada que dependa da equipa.
     reply: greetingOnly
-      ? input.agent?.greeting_template || "Olá, obrigado por responder. Como posso te ajudar?"
+      ? `${getGreeting()}. ${input.agent?.greeting_template || "Agradecemos o contacto. Em que podemos ajudar?"}`
       : qualified
-        ? input.agent?.handoff_instructions ||
-          "Perfeito, ja tenho informacoes suficientes. Vou encaminhar seu atendimento para a nossa equipe tecnica agora."
-        : "Perfeito. Para eu te ajudar melhor, me conta que tipo de serviço ou curso você procura e qual é o seu objetivo?"
+        ? "Obrigado, já temos a informação necessária. Vou passar o seu pedido à nossa equipa, que entrará em contacto consigo."
+        : "Para o podermos ajudar melhor, pode dizer-me que serviço ou curso procura?"
   };
 }
 

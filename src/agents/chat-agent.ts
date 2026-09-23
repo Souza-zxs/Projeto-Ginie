@@ -1,5 +1,6 @@
 import { formatNowForAgent } from "@/lib/datetime";
 import { describeServicePeriod } from "@/lib/service-hours";
+import { AGENT_LANGUAGE_RULE } from "@/agents/locale";
 import { chatCompletion, hasLlmConfigured, resolveModel, type ChatMessage } from "@/lib/openai/chat";
 
 type ChatAgentInput = {
@@ -30,23 +31,25 @@ export async function runAgentChat(input: ChatAgentInput) {
   const systemPrompt = [
     input.agent.system_prompt,
     "",
+    AGENT_LANGUAGE_RULE,
+    "",
     "Regras de ritmo para soar humano:",
     input.agent.greeting_template
       ? `Saudação preferida para resposta curta: ${input.agent.greeting_template}`
       : "",
-    "- Se a última mensagem for só um cumprimento, responda com o cumprimento indicado no período e uma pergunta curta.",
-    "- Uma pergunta por mensagem; não empilhe perguntas de qualificação.",
+    "- Se a última mensagem for só um cumprimento, responde com o cumprimento indicado no período e uma pergunta curta.",
+    "- Uma pergunta por mensagem; não acumules perguntas de qualificação.",
     "- Sem pontuação exagerada nem excesso de pontos de exclamação.",
-    input.agent.humanization_rules ? `Humanizacao configurada:\n${input.agent.humanization_rules}` : "",
+    input.agent.humanization_rules ? `Tom e humanização:\n${input.agent.humanization_rules}` : "",
     input.agent.forbidden_phrases ? `Frases proibidas:\n${input.agent.forbidden_phrases}` : "",
-    input.agent.conversation_examples ? `Exemplos bons:\n${input.agent.conversation_examples}` : "",
-    input.agent.agent_skills ? `Skills do agente:\n${input.agent.agent_skills}` : "",
+    input.agent.conversation_examples ? `Bons exemplos:\n${input.agent.conversation_examples}` : "",
+    input.agent.agent_skills ? `Conhecimento do agente:\n${input.agent.agent_skills}` : "",
     "",
-    "Voce esta em um simulador interno de WhatsApp.",
-    "Responda naturalmente, como conversa real, em mensagens curtas.",
-    "Nao devolva JSON. Nao explique criterios internos. Nao diga que e um teste.",
+    "Estás num simulador interno de WhatsApp.",
+    "Responde com naturalidade, como numa conversa real, em mensagens curtas.",
+    "Não devolvas JSON, não expliques critérios internos e não digas que é um teste.",
     input.agent.qualification_criteria
-      ? `Criterios de qualificacao: ${input.agent.qualification_criteria}`
+      ? `Critérios de qualificação: ${input.agent.qualification_criteria}`
       : "",
     input.agent.handoff_instructions
       ? `Encaminhamento: ${input.agent.handoff_instructions}`
