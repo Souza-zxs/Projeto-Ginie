@@ -20,39 +20,76 @@ export async function getActiveIntegrationConfig(
   return data?.config ?? {};
 }
 
+/** Como o webhook da Uazapi identifica a instância (número) que recebeu a mensagem. */
+export type UazapiInstanceRef = {
+  /** `token` do payload: é o mesmo token da instância usado para enviar mensagens. */
+  token?: string | null;
+  /** `instanceName` do payload, comparado com o "Instance ID" cadastrado (opcional). */
+  name?: string | null;
+};
+
+type UazapiIntegrationRow = { organization_id: string; config: IntegrationConfig | null };
+
+function matchUazapiRow<T extends { config: IntegrationConfig | null }>(rows: T[], instance?: UazapiInstanceRef) {
+  if (instance?.token) {
+    const byToken = rows.find((row) => configString(row.config ?? {}, ["token", "apiKey", "api_key"]) === instance.token);
+    if (byToken) return byToken;
+  }
+
+  if (instance?.name) {
+    const byName = rows.find((row) => configString(row.config ?? {}, ["instanceId"]) === instance.name);
+    if (byName) return byName;
+  }
+
+  return null;
+}
+
 /**
- * Uazapi permite várias instâncias (números) por organização — diferente da
- * maioria dos providers, que têm uma config única. Quando o webhook informa
- * de qual instância veio a mensagem (`instanceId`), busca a integração cuja
- * config.instanceId bate com isso, para responder pelo MESMO número que
- * recebeu. Sem instanceId (ou sem bater com nenhuma), cai no comportamento
- * antigo — pega a integração Uazapi ativa mais recente — o que mantém
- * organizações com um único número funcionando sem precisar configurar nada.
+ * Uazapi permite várias instâncias (números) por organização, cada uma com seu
+ * agente. Para responder pelo MESMO número que recebeu, casa a integração pelo
+ * token da instância (vem em todo webhook, sem configuração manual) e, em
+ * seguida, pelo Instance ID cadastrado. Sem nenhum dos dois, usa a integração
+ * Uazapi ativa mais recente — o que mantém organizações com um número só
+ * funcionando sem configurar nada.
  */
 export async function getUazapiIntegrationConfig(
   supabase: SupabaseClient,
   organizationId: string,
-  instanceId?: string | null
+  instance?: UazapiInstanceRef
 ) {
   const { data } = await supabase
     .from("integrations")
-    .select("config")
+    .select("organization_id, config")
     .eq("organization_id", organizationId)
     .eq("provider", "uazapi")
     .eq("active", true)
     .order("created_at", { ascending: false })
-    .returns<Array<{ config: IntegrationConfig | null }>>();
+    .returns<UazapiIntegrationRow[]>();
 
   const rows = data ?? [];
 
-  if (instanceId) {
-    const match = rows.find((row) => configString(row.config ?? {}, ["instanceId"]) === instanceId);
-    if (match) {
-      return match.config ?? {};
-    }
+  return (matchUazapiRow(rows, instance) ?? rows[0])?.config ?? {};
+}
+
+/**
+ * Descobre a organização dona da instância que recebeu a mensagem. Precisa do
+ * client admin (busca em todas as organizações). Casa SÓ pelo token: o nome da
+ * instância pode se repetir entre organizações ("Atendimento") e mandaria a
+ * mensagem para a organização errada.
+ */
+export async function findUazapiOrganizationByToken(supabase: SupabaseClient, token: string | null) {
+  if (!token) {
+    return null;
   }
 
-  return rows[0]?.config ?? {};
+  const { data } = await supabase
+    .from("integrations")
+    .select("organization_id, config")
+    .eq("provider", "uazapi")
+    .eq("active", true)
+    .returns<UazapiIntegrationRow[]>();
+
+  return matchUazapiRow(data ?? [], { token })?.organization_id ?? null;
 }
 
 export function configString(config: IntegrationConfig, keys: string[], fallback?: string | null) {

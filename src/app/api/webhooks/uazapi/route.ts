@@ -1,36 +1,18 @@
-import { NextResponse } from "next/server";
+import { after, NextResponse } from "next/server";
 import { normalizePhone } from "@/lib/phone";
 import { scheduleBrokerProgressChecks } from "@/services/broker-sla/workflow";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { findUazapiOrganizationByToken } from "@/services/integrations/config";
 import { processUazapiLeadMessage } from "@/services/uazapi/lead-workflow";
+import {
+  parseUazapiWebhook,
+  redactUazapiPayload,
+  type ParsedUazapiWebhook,
+  type UazapiWebhookPayload
+} from "@/services/uazapi/webhook-payload";
 
-type UazapiMessageData = {
-  sender?: string;
-  chatid?: string;
-  text?: string;
-  fromMe?: boolean;
-  isGroup?: boolean;
-  wasSentByApi?: boolean;
-  hauzapp_cliente_id?: string;
-  clienteID?: string;
-  clienteId?: string;
-};
-
-type UazapiWebhookEnvelope = {
-  event?: string;
-  instance?: string;
-  data?: UazapiMessageData | UazapiMessageData[];
-};
-
-type UazapiPayload = UazapiWebhookEnvelope & {
-  phone?: string;
-  from?: string;
-  text?: string;
-  message?: string;
-  clienteID?: string;
-  clienteId?: string;
-  hauzapp_cliente_id?: string;
-};
+type IncomingMessage = Extract<ParsedUazapiWebhook, { kind: "message" }>;
+type AdminClient = ReturnType<typeof createAdminClient>;
 
 export async function POST(request: Request) {
   const webhookSecret = process.env.UAZAPI_WEBHOOK_SECRET;
@@ -41,23 +23,68 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Invalid webhook token." }, { status: 401 });
   }
 
-  const payload = (await request.json().catch(() => ({}))) as UazapiPayload;
-  const messageData = extractUazapiMessage(payload);
+  const payload = (await request.json().catch(() => ({}))) as UazapiWebhookPayload;
+  const message = parseUazapiWebhook(payload);
 
-  if (messageData && (messageData.fromMe || messageData.isGroup)) {
-    return NextResponse.json({ processed: false, reason: "ignored_own_or_group_message" });
+  // Eventos que não interessam (status, conexão, mensagens nossas, grupos) respondem 200:
+  // um erro faria a Uazapi reenviar o mesmo evento várias vezes.
+  if (message.kind === "ignored") {
+    return NextResponse.json({ processed: false, reason: message.reason });
   }
 
-  const phone = normalizePhone(
-    messageData?.sender?.split("@")[0] || messageData?.chatid?.split("@")[0] || payload.phone || payload.from
-  );
-  const text = messageData?.text || payload.text || payload.message || "";
+  const phone = normalizePhone(message.rawPhone);
 
   if (!phone) {
-    return NextResponse.json({ error: "Telefone nao identificado." }, { status: 400 });
+    return NextResponse.json({ processed: false, reason: "invalid_phone" });
   }
 
   const supabase = createAdminClient();
+
+  if (message.externalMessageId) {
+    const { data: duplicate } = await supabase
+      .from("messages")
+      .select("id")
+      .eq("external_message_id", message.externalMessageId)
+      .limit(1)
+      .maybeSingle<{ id: string }>();
+
+    if (duplicate) {
+      return NextResponse.json({ processed: false, reason: "duplicate_message" });
+    }
+  }
+
+  const safePayload = redactUazapiPayload(payload);
+
+  // A Uazapi pede resposta 200 imediata. O agente roda num modelo local que pode levar
+  // mais de um minuto; segurar a requisição até lá faria a Uazapi reenviar a mensagem
+  // e o lead receberia a resposta em dobro. `after` processa depois de responder.
+  after(async () => {
+    try {
+      await handleIncomingMessage(supabase, message, phone, safePayload);
+    } catch (error) {
+      await supabase.from("webhook_logs").insert({
+        organization_id: null,
+        provider: "uazapi",
+        event_type: "processing_error",
+        payload: {
+          error: error instanceof Error ? error.message : "Erro desconhecido.",
+          externalMessageId: message.externalMessageId,
+          instanceName: message.instanceName
+        },
+        status: "failed"
+      });
+    }
+  });
+
+  return NextResponse.json({ received: true });
+}
+
+async function handleIncomingMessage(
+  supabase: AdminClient,
+  message: IncomingMessage,
+  phone: string,
+  payload: UazapiWebhookPayload
+) {
   const { data: broker } = await supabase
     .from("brokers")
     .select("id, organization_id")
@@ -77,7 +104,7 @@ export async function POST(request: Request) {
       const adminResult = await processAdminMessage({
         supabase,
         organizationId: adminProfile.organization_id,
-        text,
+        text: message.text,
         payload
       });
       await supabase.from("webhook_logs").insert({
@@ -88,7 +115,7 @@ export async function POST(request: Request) {
         status: adminResult.updated ? "processed_admin_update" : "processed_admin"
       });
 
-      return NextResponse.json({ processed: true, role: "admin", ...adminResult });
+      return;
     }
   }
 
@@ -101,23 +128,28 @@ export async function POST(request: Request) {
   });
 
   if (!broker) {
-    const organizationId = await resolveLeadOrganization(supabase, phone);
+    // Quem recebeu é a instância dona do token; só sem ela cai nas heurísticas antigas.
+    const organizationId =
+      (await findUazapiOrganizationByToken(supabase, message.instanceToken)) ??
+      (await resolveLeadOrganization(supabase, phone));
 
     if (!organizationId) {
-      return NextResponse.json({ processed: false, reason: "organization_not_found" });
+      return;
     }
 
-    const result = await processUazapiLeadMessage({
+    await processUazapiLeadMessage({
       supabase,
       organizationId,
       phone,
-      text,
+      text: message.text,
       payload,
-      instanceId: payload.instance ?? null,
-      hauzappClienteId: getHauzappClienteId(payload)
+      instance: { token: message.instanceToken, name: message.instanceName },
+      externalMessageId: message.externalMessageId,
+      senderName: message.senderName,
+      hauzappClienteId: message.hauzappClienteId
     });
 
-    return NextResponse.json(result);
+    return;
   }
 
   const { data: assignment } = await supabase
@@ -131,12 +163,12 @@ export async function POST(request: Request) {
     .maybeSingle<{ id: string; lead_id: string; status: string; responded_at: string | null }>();
 
   if (!assignment) {
-    return NextResponse.json({ processed: false });
+    return;
   }
 
   const now = new Date().toISOString();
   const firstBrokerReply = assignment.status === "assigned" || !assignment.responded_at;
-  const stage = inferBrokerStage(text);
+  const stage = inferBrokerStage(message.text);
 
   await Promise.all([
     supabase
@@ -156,8 +188,9 @@ export async function POST(request: Request) {
       direction: "inbound",
       channel: "uazapi",
       type: "text",
-      content: text,
+      content: message.text,
       status: "received",
+      external_message_id: message.externalMessageId,
       payload
     })
   ]);
@@ -171,14 +204,9 @@ export async function POST(request: Request) {
       brokerId: broker.id
     });
   }
-
-  return NextResponse.json({ processed: true, firstBrokerReply, stage });
 }
 
-async function resolveLeadOrganization(
-  supabase: ReturnType<typeof createAdminClient>,
-  phone: string
-) {
+async function resolveLeadOrganization(supabase: AdminClient, phone: string) {
   const { data: contact } = await supabase
     .from("contacts")
     .select("organization_id")
@@ -215,37 +243,13 @@ async function resolveLeadOrganization(
   return integration?.organization_id ?? null;
 }
 
-function extractUazapiMessage(payload: UazapiPayload): UazapiMessageData | null {
-  const data = payload.data;
-
-  if (!data) {
-    return null;
-  }
-
-  return Array.isArray(data) ? data[0] ?? null : data;
-}
-
-function getHauzappClienteId(payload: UazapiPayload) {
-  const messageData = extractUazapiMessage(payload);
-
-  return (
-    messageData?.hauzapp_cliente_id ||
-    messageData?.clienteID ||
-    messageData?.clienteId ||
-    payload.hauzapp_cliente_id ||
-    payload.clienteID ||
-    payload.clienteId ||
-    null
-  );
-}
-
 async function processAdminMessage({
   supabase,
   organizationId,
   text,
   payload
 }: {
-  supabase: ReturnType<typeof createAdminClient>;
+  supabase: AdminClient;
   organizationId: string;
   text: string;
   payload: unknown;
@@ -306,7 +310,7 @@ function inferBrokerStage(text: string) {
 function inferStageFromText(text: string, fallbackToAttending: boolean) {
   const normalized = text
     .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[̀-ͯ]/g, "")
     .toLowerCase();
 
   if (normalized.includes("ganhou") || normalized.includes("fechou")) return "won";

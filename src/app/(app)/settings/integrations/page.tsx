@@ -1,6 +1,7 @@
 import { Badge } from "@/components/badge";
 import Link from "next/link";
 import type { Route } from "next";
+import { headers } from "next/headers";
 import { PageHeader } from "@/components/page-header";
 import { getCurrentProfile } from "@/lib/auth/organization";
 import { createClient } from "@/lib/supabase/server";
@@ -52,6 +53,7 @@ export default async function IntegrationsPage() {
   const uazapiConnections = (integrations ?? []).filter((integration) => integration.provider === "uazapi");
   const leadAgents = (agents ?? []).filter((agent) => agent.agent_type === "lead_meta");
   const agentNameById = new Map((agents ?? []).map((agent) => [agent.id, agent.name]));
+  const uazapiWebhookUrl = await getUazapiWebhookUrl();
 
   return (
     <>
@@ -161,17 +163,19 @@ export default async function IntegrationsPage() {
           )}
 
           <div className="rounded-md border bg-muted/40 p-3 text-sm text-muted-foreground">
-            Webhook para configurar em <b>cada</b> instância na Uazapi (o mesmo endereço serve para todas):
+            Webhook para configurar em <b>cada</b> instância na Uazapi (o mesmo endereço serve para todas),
+            com o evento <b>messages</b>:
             <div className="mt-2 break-all rounded-md bg-white px-3 py-2 font-mono text-xs text-slate-700">
-              http://179.199.135.212:8080/api/webhooks/uazapi?token=SEU_UAZAPI_WEBHOOK_SECRET
+              {uazapiWebhookUrl}
             </div>
             <p className="mt-2">
-              Depois de conectar, manda uma mensagem de teste pro número e confere em{" "}
+              Troque <b>SEU_UAZAPI_WEBHOOK_SECRET</b> pelo valor de <code>UAZAPI_WEBHOOK_SECRET</code> do
+              servidor. Cada número é reconhecido automaticamente pelo token da instância, então o
+              &quot;Instance ID&quot; abaixo é opcional. Para conferir o que chegou, veja{" "}
               <Link href={"/settings/logs" as Route} className="font-semibold text-primary">
                 Configurações &gt; Logs
-              </Link>{" "}
-              o valor de <b>instance</b> que chegou — cola ele no campo &quot;Instance ID&quot; abaixo pra essa
-              conexão específica responder pelo número certo.
+              </Link>
+              .
             </p>
           </div>
 
@@ -180,8 +184,8 @@ export default async function IntegrationsPage() {
             <Field name="name" label="Nome interno" placeholder="Uazapi - Vendas" />
             <Field
               name="instanceId"
-              label="Instance ID"
-              placeholder="Cole depois do primeiro teste (opcional agora)"
+              label="Instance ID (opcional)"
+              placeholder="Nome da instância na Uazapi — só se o token não bastar"
               required={false}
             />
             <Field name="baseUrl" label="URL da Uazapi" placeholder="https://sua-uazapi.com" />
@@ -322,6 +326,20 @@ function AgentSelect({
       </select>
     </label>
   );
+}
+
+/**
+ * Endereço do webhook a partir do domínio em que a página foi aberta (atrás do nginx,
+ * vem em x-forwarded-host). Antes era um IP fixo em HTTP na porta 8080, que contorna o
+ * HTTPS e quebra quando o servidor ou o domínio mudam.
+ */
+async function getUazapiWebhookUrl() {
+  const requestHeaders = await headers();
+  const host = requestHeaders.get("x-forwarded-host") ?? requestHeaders.get("host") ?? "app.darmais.pt";
+  const isLocal = /^(localhost|127\.0\.0\.1)(:\d+)?$/.test(host);
+  const protocol = requestHeaders.get("x-forwarded-proto") ?? (isLocal ? "http" : "https");
+
+  return `${protocol}://${host}/api/webhooks/uazapi?token=SEU_UAZAPI_WEBHOOK_SECRET`;
 }
 
 function getLatestIntegration(integrations: IntegrationRow[], provider: string) {

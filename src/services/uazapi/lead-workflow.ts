@@ -4,7 +4,8 @@ import { normalizePhone } from "@/lib/phone";
 import {
   configString,
   getActiveIntegrationConfig,
-  getUazapiIntegrationConfig
+  getUazapiIntegrationConfig,
+  type UazapiInstanceRef
 } from "@/services/integrations/config";
 import { upsertLeadFromQualification } from "@/services/leads/workflow";
 import { sendUazapiMessage } from "@/services/uazapi/send-message";
@@ -30,7 +31,11 @@ type LeadMessageInput = {
   phone: string;
   text: string;
   payload: unknown;
-  instanceId?: string | null;
+  /** Instância (número) que recebeu a mensagem; a resposta sai por ela. */
+  instance?: UazapiInstanceRef;
+  /** ID da mensagem no WhatsApp; gravado para descartar reenvios do webhook. */
+  externalMessageId?: string | null;
+  senderName?: string | null;
   hauzappClienteId?: string | null;
 };
 
@@ -40,7 +45,9 @@ export async function processUazapiLeadMessage({
   phone,
   text,
   payload,
-  instanceId,
+  instance,
+  externalMessageId,
+  senderName,
   hauzappClienteId
 }: LeadMessageInput) {
   const normalizedPhone = normalizePhone(phone) ?? phone.replace(/\D/g, "");
@@ -49,6 +56,7 @@ export async function processUazapiLeadMessage({
     organizationId,
     phone: normalizedPhone,
     payload,
+    senderName,
     hauzappClienteId
   });
 
@@ -61,6 +69,7 @@ export async function processUazapiLeadMessage({
     type: "text",
     content: text,
     status: "received",
+    external_message_id: externalMessageId ?? null,
     payload
   });
 
@@ -68,15 +77,19 @@ export async function processUazapiLeadMessage({
     return { processed: true, ai: false, conversationId: conversation.id };
   }
 
-  const agent = await getUazapiLeadAgent(supabase, organizationId, instanceId);
-  const { data: messages } = await supabase
+  const agent = await getUazapiLeadAgent(supabase, organizationId, instance);
+  // Ordem decrescente + limit traz as 30 mais RECENTES; depois volta à ordem cronológica.
+  // Em ordem crescente viriam as 30 mais antigas e, numa conversa longa, o agente não
+  // veria a mensagem que acabou de chegar.
+  const { data: recentMessages } = await supabase
     .from("messages")
     .select("direction, content")
     .eq("organization_id", organizationId)
     .eq("conversation_id", conversation.id)
-    .order("created_at", { ascending: true })
+    .order("created_at", { ascending: false })
     .limit(30)
     .returns<Array<{ direction: "inbound" | "outbound"; content: string | null }>>();
+  const messages = [...(recentMessages ?? [])].reverse();
 
   const qualification = await runLeadAgent({
     contact: {
@@ -85,11 +98,11 @@ export async function processUazapiLeadMessage({
     },
     campaign: {
       property_description:
-        "Lead vindo do HauzApp/Prospecção atendido pela Uazapi. Qualifique, entenda necessidade e tente conduzir para visita.",
+        "Lead que entrou em contato pelo WhatsApp. Entenda a necessidade, qualifique e, quando fizer sentido, conduza para o próximo passo.",
       agent_prompt: agent?.system_prompt ?? null
     },
     agent,
-    messages: messages ?? []
+    messages
   });
 
   const lead = await upsertLeadFromQualification({
@@ -101,7 +114,7 @@ export async function processUazapiLeadMessage({
     qualification,
     source: "hauzapp"
   });
-  const uazapiConfig = await getUazapiIntegrationConfig(supabase, organizationId, instanceId);
+  const uazapiConfig = await getUazapiIntegrationConfig(supabase, organizationId, instance);
   const result = await sendUazapiMessage({
     phone: normalizedPhone,
     text: qualification.reply,
@@ -139,10 +152,10 @@ export async function processUazapiLeadMessage({
 async function getUazapiLeadAgent(
   supabase: SupabaseClient,
   organizationId: string,
-  instanceId?: string | null
+  instance?: UazapiInstanceRef
 ) {
   const hauzappConfig = await getActiveIntegrationConfig(supabase, organizationId, "hauzapp");
-  const uazapiConfig = await getUazapiIntegrationConfig(supabase, organizationId, instanceId);
+  const uazapiConfig = await getUazapiIntegrationConfig(supabase, organizationId, instance);
   const agentId =
     configString(hauzappConfig, ["leadAgentId", "lead_agent_id", "uazapiLeadAgentId"]) ||
     configString(uazapiConfig, ["leadAgentId", "lead_agent_id"]);
@@ -171,12 +184,14 @@ async function findOrCreateUazapiConversation({
   organizationId,
   phone,
   payload,
+  senderName,
   hauzappClienteId
 }: {
   supabase: SupabaseClient;
   organizationId: string;
   phone: string;
   payload: unknown;
+  senderName?: string | null;
   hauzappClienteId?: string | null;
 }) {
   const { data: existingLead } = await supabase
@@ -215,7 +230,7 @@ async function findOrCreateUazapiConversation({
       .insert({
         organization_id: organizationId,
         campaign_id: null,
-        name: existingLead?.name ?? null,
+        name: existingLead?.name ?? senderName ?? null,
         phone,
         raw_data: { source: "uazapi", payload },
         status: "hauzapp_prospect",
