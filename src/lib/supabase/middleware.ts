@@ -1,5 +1,6 @@
 import { createServerClient, type CookieOptions } from "@supabase/ssr";
 import { type NextRequest, NextResponse } from "next/server";
+import { isDisabledRoute } from "@/lib/disabled-routes";
 
 type CookieToSet = {
   name: string;
@@ -41,11 +42,24 @@ export async function updateSession(request: NextRequest) {
   } = await supabase.auth.getUser();
 
   const pathname = request.nextUrl.pathname;
+
+  if (isDisabledRoute(pathname)) {
+    if (pathname.startsWith("/api/")) {
+      return NextResponse.json({ error: "Recurso indisponível." }, { status: 404 });
+    }
+
+    const url = request.nextUrl.clone();
+    url.pathname = "/dashboard";
+    url.search = "";
+    return NextResponse.redirect(url);
+  }
+
   const isAuthRoute = pathname.startsWith("/login") || pathname.startsWith("/auth");
   const isPrivateRoute =
     pathname.startsWith("/dashboard") ||
     pathname.startsWith("/campaigns") ||
     pathname.startsWith("/inbox") ||
+    pathname.startsWith("/clients") ||
     pathname.startsWith("/crm") ||
     pathname.startsWith("/leads") ||
     pathname.startsWith("/brokers") ||

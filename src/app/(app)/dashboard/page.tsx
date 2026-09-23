@@ -4,12 +4,10 @@ import {
   CheckCircle2,
   Clock3,
   MessageCircle,
-  Megaphone,
   RefreshCcw,
   Send,
   TrendingUp,
-  UserCheck,
-  Users
+  UserCheck
 } from "lucide-react";
 import { PageHeader } from "@/components/page-header";
 import { StatCard } from "@/components/stat-card";
@@ -19,12 +17,10 @@ import { createClient } from "@/lib/supabase/server";
 import { getMetaPhoneStatus, getMetaTemplates } from "@/services/meta/account";
 
 type MetricTable =
-  | "contacts"
   | "messages"
   | "leads"
   | "broker_assignments"
   | "scheduled_jobs"
-  | "campaigns"
   | "ai_agents"
   | "brokers";
 
@@ -37,7 +33,7 @@ export default async function DashboardPage() {
       <>
         <PageHeader
           title="Dashboard"
-          description="Acompanhe importacoes, disparos, respostas e qualificacao dos leads em tempo real."
+          description="Acompanhe mensagens, respostas e qualificacao dos leads em tempo real."
         />
         <section className="rounded-xl border bg-card p-6 shadow-sm">
           <h2 className="font-display text-lg text-slate-950">Perfil nao configurado</h2>
@@ -48,7 +44,6 @@ export default async function DashboardPage() {
   }
 
   const [
-    contactsImported,
     messagesSent,
     failedMessages,
     inboundMessages,
@@ -56,14 +51,12 @@ export default async function DashboardPage() {
     brokerSentLeads,
     brokerNoResponse,
     redistributedLeads,
-    activeCampaigns,
     pendingJobs,
     activeAgents,
     activeBrokers,
     metaPhone,
     metaTemplates
   ] = await Promise.all([
-    countRows(supabase, "contacts", profile.organization_id),
     countRows(supabase, "messages", profile.organization_id, {
       column: "direction",
       value: "outbound"
@@ -88,10 +81,6 @@ export default async function DashboardPage() {
     countRows(supabase, "broker_assignments", profile.organization_id, {
       column: "status",
       value: "redistributed"
-    }),
-    countRows(supabase, "campaigns", profile.organization_id, {
-      column: "status",
-      value: "active"
     }),
     countRows(supabase, "scheduled_jobs", profile.organization_id, {
       column: "status",
@@ -119,7 +108,6 @@ export default async function DashboardPage() {
     messagesSent > 0 ? `${Math.round((inboundMessages / messagesSent) * 100)}%` : "0%";
 
   const stats = [
-    { label: "Contatos importados", value: String(contactsImported), icon: Users },
     { label: "Mensagens enviadas", value: String(messagesSent), icon: Send },
     { label: "Falhas", value: String(failedMessages), icon: AlertTriangle, tone: "warning" as const },
     { label: "Respostas recebidas", value: String(inboundMessages), icon: MessageCircle },
@@ -133,7 +121,6 @@ export default async function DashboardPage() {
     { label: "Enviados a equipe", value: String(brokerSentLeads), icon: UserCheck },
     { label: "Equipe sem resposta", value: String(brokerNoResponse), icon: AlertTriangle },
     { label: "Leads redistribuidos", value: String(redistributedLeads), icon: RefreshCcw },
-    { label: "Campanhas ativas", value: String(activeCampaigns), icon: Megaphone },
     { label: "Jobs pendentes", value: String(pendingJobs), icon: Clock3 },
     { label: "Agentes ativos", value: String(activeAgents), icon: Bot },
     { label: "Equipe ativa", value: String(activeBrokers), icon: UserCheck }
@@ -143,7 +130,7 @@ export default async function DashboardPage() {
     <>
       <PageHeader
         title="Dashboard"
-        description="Acompanhe importacoes, disparos, respostas e qualificacao dos leads em tempo real."
+        description="Acompanhe mensagens, respostas e qualificacao dos leads em tempo real."
       />
       <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         {stats.map((stat) => (
@@ -174,7 +161,7 @@ export default async function DashboardPage() {
         <div className="rounded-xl border bg-card p-6 shadow-sm">
           <h2 className="font-display text-lg text-slate-950">Operacao</h2>
           <div className="mt-4 grid gap-3 text-sm text-muted-foreground">
-            <HealthRow label="Fila de disparos" ok={pendingJobs < 100} value={`${pendingJobs} pendente(s)`} />
+            <HealthRow label="Fila de tarefas" ok={pendingJobs < 100} value={`${pendingJobs} pendente(s)`} />
             <HealthRow label="Agentes IA" ok={activeAgents > 0} value={`${activeAgents} ativo(s)`} />
             <HealthRow label="Equipe" ok={activeBrokers > 0} value={`${activeBrokers} ativo(s)`} />
             <HealthRow label="Templates Meta" ok={metaTemplates.data.some((template) => template.status === "APPROVED")} value={`${metaTemplates.data.length} retornado(s)`} />

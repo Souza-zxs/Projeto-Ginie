@@ -1,19 +1,16 @@
 import Link from "next/link";
 import type { Route } from "next";
 import {
-  BarChart3,
   Bot,
   Bell,
   Building2,
-  CalendarDays,
   ClipboardList,
+  Contact,
   Inbox,
   LayoutDashboard,
   LogOut,
-  Megaphone,
   Plug,
   Settings,
-  Smartphone,
   Users
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
@@ -26,15 +23,12 @@ const DEFAULT_LOGO_SRC = "/brand/logo-fill.png";
 
 const navigation: Array<{ href: Route; label: string; icon: LucideIcon }> = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
-  { href: "/campaigns", label: "Campanhas", icon: Megaphone },
   { href: "/inbox", label: "Inbox", icon: Inbox },
-  { href: "/crm", label: "CRM", icon: BarChart3 },
-  { href: "/appointments" as Route, label: "Agenda", icon: CalendarDays },
+  { href: "/clients" as Route, label: "Clientes", icon: Contact },
   { href: "/reminders" as Route, label: "Lembretes", icon: Bell },
   { href: "/brokers", label: "Equipe", icon: Users },
   { href: "/settings/agents" as Route, label: "Agentes IA", icon: Bot },
   { href: "/settings/organization" as Route, label: "Organização", icon: Building2 },
-  { href: "/settings/whatsapp" as Route, label: "WhatsApp", icon: Smartphone },
   { href: "/settings/integrations" as Route, label: "Integrações", icon: Plug },
   { href: "/settings/logs" as Route, label: "Logs", icon: ClipboardList },
   { href: "/settings", label: "Configuracoes", icon: Settings }

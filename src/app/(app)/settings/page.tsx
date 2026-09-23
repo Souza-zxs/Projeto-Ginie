@@ -1,6 +1,6 @@
 import Link from "next/link";
 import type { Route } from "next";
-import { Bot, Building2, ClipboardList, MessageSquareText, PhoneOff, Plug, Smartphone } from "lucide-react";
+import { Bot, Building2, ClipboardList, MessageSquareText, PhoneOff, Plug } from "lucide-react";
 import { PageHeader } from "@/components/page-header";
 
 const settingsLinks: Array<{
@@ -20,12 +20,6 @@ const settingsLinks: Array<{
     title: "Integrações",
     description: "Conectar os números de WhatsApp (Uazapi).",
     icon: Plug
-  },
-  {
-    href: "/settings/whatsapp" as Route,
-    title: "WhatsApp",
-    description: "Gerenciar Meta e instancias Uazapi para rodizio de campanhas.",
-    icon: Smartphone
   },
   {
     href: "/settings/agents" as Route,

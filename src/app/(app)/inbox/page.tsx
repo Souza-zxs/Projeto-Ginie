@@ -2,32 +2,31 @@ import Link from "next/link";
 import type { Route } from "next";
 import {
   Bot,
-  CalendarClock,
-  CheckCircle2,
   Clock3,
   FileText,
   MessageCircle,
-  PanelRight,
   Phone,
   Search,
   Send,
-  UserCheck,
   UserRound
 } from "lucide-react";
 import { Badge } from "@/components/badge";
 import { PageHeader } from "@/components/page-header";
 import { cn } from "@/lib/utils";
 import { getCurrentProfile } from "@/lib/auth/organization";
+import { formatPhoneForDisplay } from "@/lib/phone";
 import { createClient } from "@/lib/supabase/server";
+import {
+  TOPIC_LABELS,
+  detectMenuProgress,
+  detectMenuTopic,
+  extractMenuAnswers
+} from "@/services/uazapi/menu-answers";
 import { AgentTester } from "./agent-tester";
 import { AutoRefresh } from "@/components/auto-refresh";
 import { ChatMessages } from "./chat-messages";
 import { ManualReplyForm } from "./manual-reply-form";
-import {
-  qualifyManuallyAction,
-  sendToBrokerAction,
-  toggleAiAction
-} from "./actions";
+import { toggleAiAction } from "./actions";
 
 type ConversationRow = {
   id: string;
@@ -40,9 +39,6 @@ type ConversationRow = {
     name: string | null;
     phone: string;
   } | null;
-  campaigns: {
-    name: string;
-  } | null;
 };
 
 type MessageRow = {
@@ -53,33 +49,7 @@ type MessageRow = {
   media_url: string | null;
   status: string;
   created_at: string;
-};
-
-type LeadRow = {
-  id: string;
-  name: string | null;
-  phone: string;
-  source: string | null;
-  interest: string | null;
-  region: string | null;
-  budget: number | null;
-  payment_method: string | null;
-  qualification_status: string | null;
-  score: number | null;
-  summary: string | null;
-  stage: string | null;
-  hauzapp_cliente_id: string | null;
-  hauzapp_stage_id: number | null;
-};
-
-type AssignmentRow = {
-  status: string;
-  assigned_at: string | null;
-  responded_at: string | null;
-  brokers: {
-    name: string;
-    phone: string | null;
-  } | null;
+  menu_step: string | null;
 };
 
 type SearchParams = {
@@ -113,7 +83,7 @@ export default async function InboxPage({
 
   const { data: conversations } = await supabase
     .from("conversations")
-    .select("id, status, current_stage, channel, ai_enabled, last_message_at, contacts(name, phone), campaigns(name)")
+    .select("id, status, current_stage, channel, ai_enabled, last_message_at, contacts(name, phone)")
     .eq("organization_id", profile.organization_id)
     .order("last_message_at", { ascending: false, nullsFirst: false })
     .limit(100)
@@ -132,7 +102,6 @@ export default async function InboxPage({
     const haystack = [
       conversation.contacts?.name,
       conversation.contacts?.phone,
-      conversation.campaigns?.name,
       conversation.current_stage,
       conversation.status
     ]
@@ -154,42 +123,17 @@ export default async function InboxPage({
   const { data: messages } = activeConversation
     ? await supabase
         .from("messages")
-        .select("id, direction, type, content, media_url, status, created_at")
+        .select("id, direction, type, content, media_url, status, created_at, menu_step:payload->>menu_step")
         .eq("organization_id", profile.organization_id)
         .eq("conversation_id", activeConversation.id)
         .order("created_at", { ascending: true })
         .returns<MessageRow[]>()
     : { data: [] };
 
-  const { data: lead } = activeConversation
-    ? await supabase
-        .from("leads")
-        .select(
-          "id, name, phone, source, interest, region, budget, payment_method, qualification_status, score, summary, stage, hauzapp_cliente_id, hauzapp_stage_id"
-        )
-        .eq("organization_id", profile.organization_id)
-        .eq("conversation_id", activeConversation.id)
-        .order("created_at", { ascending: false })
-        .limit(1)
-        .maybeSingle<LeadRow>()
-    : { data: null };
-
-  const { data: assignment } = lead
-    ? await supabase
-        .from("broker_assignments")
-        .select("status, assigned_at, responded_at, brokers(name, phone)")
-        .eq("organization_id", profile.organization_id)
-        .eq("lead_id", lead.id)
-        .order("assigned_at", { ascending: false })
-        .limit(1)
-        .maybeSingle<AssignmentRow>()
-    : { data: null };
-
   const openCount = allConversations.filter((conversation) => conversation.status !== "closed").length;
   const aiCount = allConversations.filter((conversation) => conversation.ai_enabled).length;
   const metaCount = allConversations.filter((conversation) => conversation.channel === "meta").length;
   const uazapiCount = allConversations.filter((conversation) => conversation.channel === "uazapi").length;
-  const withoutCampaignCount = allConversations.filter((conversation) => !conversation.campaigns?.name).length;
 
   return (
     <>
@@ -199,12 +143,11 @@ export default async function InboxPage({
       />
       <AutoRefresh intervalMs={5_000} />
 
-      <section className="mb-5 grid gap-3 md:grid-cols-5">
+      <section className="mb-5 grid gap-3 md:grid-cols-4">
         <Metric icon={<MessageCircle className="h-4 w-4" />} label="Abertas" value={String(openCount)} />
         <Metric icon={<Bot className="h-4 w-4" />} label="IA ativa" value={String(aiCount)} />
         <Metric icon={<Send className="h-4 w-4" />} label="Meta" value={String(metaCount)} />
         <Metric icon={<Phone className="h-4 w-4" />} label="Uazapi" value={String(uazapiCount)} />
-        <Metric icon={<PanelRight className="h-4 w-4" />} label="Sem campanha" value={String(withoutCampaignCount)} />
       </section>
 
       <div className="mb-5">
@@ -231,7 +174,7 @@ export default async function InboxPage({
                 <input
                   name="q"
                   defaultValue={searchQuery}
-                  placeholder="Buscar nome, telefone ou campanha"
+                  placeholder="Buscar nome ou telefone"
                   className="h-10 w-full rounded-md border bg-white pl-9 pr-3 text-sm outline-none transition focus:border-teal-600 focus:ring-4 focus:ring-teal-600/10"
                 />
               </label>
@@ -302,7 +245,7 @@ export default async function InboxPage({
 
         <aside className="min-h-0 overflow-hidden border-l bg-white">
           {activeConversation ? (
-            <LeadPanel conversation={activeConversation} lead={lead ?? null} assignment={assignment ?? null} />
+            <ClientPanel conversation={activeConversation} messages={messages ?? []} />
           ) : (
             <div className="p-5 text-sm text-muted-foreground">Nenhum atendimento selecionado.</div>
           )}
@@ -400,9 +343,6 @@ function ConversationItem({
             </Badge>
             <Badge tone="muted">{conversation.current_stage}</Badge>
           </div>
-          <p className="mt-2 truncate text-xs text-muted-foreground">
-            {conversation.campaigns?.name || "Conversa sem campanha vinculada"}
-          </p>
         </div>
       </div>
     </Link>
@@ -447,21 +387,7 @@ function ConversationActions({ conversation }: { conversation: ConversationRow }
         <input type="hidden" name="ai_enabled" value={String(conversation.ai_enabled)} />
         <button className="inline-flex items-center gap-2 rounded-md border bg-white px-3 py-1.5 text-xs font-medium transition hover:bg-muted">
           <Bot className="h-3.5 w-3.5" />
-          {conversation.ai_enabled ? "Pausar IA" : "Ativar IA"}
-        </button>
-      </form>
-      <form action={qualifyManuallyAction}>
-        <input type="hidden" name="conversation_id" value={conversation.id} />
-        <button className="inline-flex items-center gap-2 rounded-md border bg-white px-3 py-1.5 text-xs font-medium transition hover:bg-muted">
-          <CheckCircle2 className="h-3.5 w-3.5" />
-          Qualificar
-        </button>
-      </form>
-      <form action={sendToBrokerAction}>
-        <input type="hidden" name="conversation_id" value={conversation.id} />
-        <button className="inline-flex items-center gap-2 rounded-md border bg-white px-3 py-1.5 text-xs font-medium transition hover:bg-muted">
-          <UserCheck className="h-3.5 w-3.5" />
-          Enviar a equipe
+          {conversation.ai_enabled ? "Pausar bot" : "Ativar bot"}
         </button>
       </form>
     </div>
@@ -497,97 +423,63 @@ function MessageBubble({ message }: { message: MessageRow }) {
   );
 }
 
-function LeadPanel({
+function ClientPanel({
   conversation,
-  lead,
-  assignment
+  messages
 }: {
   conversation: ConversationRow;
-  lead: LeadRow | null;
-  assignment: AssignmentRow | null;
+  messages: MessageRow[];
 }) {
+  const answers = extractMenuAnswers(messages);
+  const topic = detectMenuTopic(messages);
+  const progress = detectMenuProgress(messages);
+  const name = conversation.contacts?.name || "Sem nome";
+
   return (
     <div className="max-h-[740px] overflow-y-auto p-5 xl:h-full xl:max-h-none">
       <div className="flex items-center gap-3 border-b pb-4">
-        <div className="flex h-11 w-11 items-center justify-center rounded-md bg-slate-100 text-slate-700">
+        <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-md bg-slate-100 text-slate-700">
           <UserRound className="h-5 w-5" />
         </div>
-        <div>
-          <h2 className="text-sm font-semibold text-slate-950">Contexto do lead</h2>
-          <p className="mt-1 text-xs text-muted-foreground">{conversation.campaigns?.name || "Sem campanha"}</p>
+        <div className="min-w-0">
+          <h2 className="truncate text-sm font-semibold text-slate-950">{name}</h2>
+          <p className="mt-1 text-xs text-muted-foreground">
+            {conversation.contacts?.phone ? formatPhoneForDisplay(conversation.contacts.phone) : "Sem número"}
+          </p>
         </div>
       </div>
 
       <div className="space-y-4 py-4">
-        <PanelSection title="Atendimento">
-          <InfoRow label="Etapa" value={conversation.current_stage} />
-          <InfoRow label="Canal" value={channelLabel(conversation.channel)} />
-          <InfoRow label="Ultima interacao" value={formatLongDate(conversation.last_message_at)} />
-          <InfoRow label="Status da IA" value={conversation.ai_enabled ? "Ativa" : "Pausada"} />
-        </PanelSection>
-
-        <PanelSection title="Qualificacao">
-          {lead ? (
-            <>
-              <div className="rounded-md border bg-slate-50 p-3">
-                <div className="flex items-center justify-between gap-3">
-                  <span className="text-xs font-medium text-muted-foreground">Score</span>
-                  <span className="text-lg font-semibold text-slate-950">{lead.score ?? 0}</span>
-                </div>
-                <div className="mt-2 h-2 overflow-hidden rounded-full bg-slate-200">
-                  <div
-                    className="h-full rounded-full bg-teal-700"
-                    style={{ width: `${Math.max(0, Math.min(100, lead.score ?? 0))}%` }}
-                  />
-                </div>
-              </div>
-              <InfoRow label="Status" value={lead.qualification_status || "Nao informado"} />
-              <InfoRow label="Stage interno" value={lead.stage || "Nao informado"} />
-              <InfoRow label="Interesse" value={lead.interest || "Nao informado"} />
-              <InfoRow label="Regiao" value={lead.region || "Nao informado"} />
-              <InfoRow label="Orcamento" value={formatBudget(lead.budget)} />
-              <InfoRow label="Pagamento" value={lead.payment_method || "Nao informado"} />
-              {lead.summary ? (
-                <div>
-                  <p className="text-xs font-medium text-muted-foreground">Resumo da IA</p>
-                  <p className="mt-1 rounded-md bg-slate-50 p-3 text-sm leading-6 text-slate-700">{lead.summary}</p>
-                </div>
-              ) : null}
-            </>
-          ) : (
-            <p className="rounded-md bg-slate-50 p-3 text-sm text-muted-foreground">
-              Lead ainda nao criado. Use qualificar quando a conversa estiver pronta para CRM.
-            </p>
-          )}
-        </PanelSection>
-
-        <PanelSection title="Equipe">
-          {assignment?.brokers ? (
-            <>
-              <InfoRow label="Nome" value={assignment.brokers.name} />
-              <InfoRow label="Telefone" value={assignment.brokers.phone || "Nao informado"} />
-              <InfoRow label="Status" value={assignment.status} />
-              <InfoRow label="Enviado em" value={formatLongDate(assignment.assigned_at)} />
-              <InfoRow label="Resposta" value={formatLongDate(assignment.responded_at)} />
-            </>
-          ) : (
-            <p className="rounded-md bg-slate-50 p-3 text-sm text-muted-foreground">
-              Nenhum integrante atribuido nesta conversa.
-            </p>
-          )}
-        </PanelSection>
-
-        <PanelSection title="Proximos passos">
-          <div className="space-y-2 text-sm text-slate-700">
-            <div className="flex gap-2 rounded-md border bg-white p-3">
-              <CalendarClock className="mt-0.5 h-4 w-4 text-teal-700" />
-              <span>Confirmar visita tecnica quando o cliente escolher data e horario.</span>
-            </div>
-            <div className="flex gap-2 rounded-md border bg-white p-3">
-              <UserCheck className="mt-0.5 h-4 w-4 text-teal-700" />
-              <span>Enviar a equipe quando houver lead qualificado.</span>
-            </div>
+        <PanelSection title="Pedido">
+          <div className="flex flex-wrap gap-2">
+            {topic ? <Badge tone="muted">{TOPIC_LABELS[topic]}</Badge> : null}
+            {progress !== "no_menu" ? (
+              <Badge tone={progress === "handed_off" ? "warning" : "default"}>
+                {progress === "handed_off" ? "Encaminhado para a equipa" : "A responder ao bot"}
+              </Badge>
+            ) : null}
           </div>
+        </PanelSection>
+
+        <PanelSection title="Respostas do menu">
+          {answers.length ? (
+            answers.map((item, index) => (
+              <div key={`${item.question}-${index}`} className="rounded-md border bg-white px-3 py-2">
+                <p className="text-xs text-muted-foreground">{item.question}</p>
+                <p className="mt-0.5 whitespace-pre-wrap break-words text-sm font-medium text-slate-900">{item.answer}</p>
+              </div>
+            ))
+          ) : (
+            <p className="rounded-md bg-slate-50 p-3 text-sm text-muted-foreground">
+              Ainda não respondeu a nenhuma pergunta do menu.
+            </p>
+          )}
+        </PanelSection>
+
+        <PanelSection title="Atendimento">
+          <InfoRow label="Canal" value={channelLabel(conversation.channel)} />
+          <InfoRow label="Última interação" value={formatLongDate(conversation.last_message_at)} />
+          <InfoRow label="Bot" value={conversation.ai_enabled ? "Ativo" : "Pausado"} />
         </PanelSection>
       </div>
     </div>
@@ -737,16 +629,4 @@ function formatLongDate(value: string | null) {
     hour: "2-digit",
     minute: "2-digit"
   }).format(new Date(value));
-}
-
-function formatBudget(value: number | null) {
-  if (!value) {
-    return "Nao informado";
-  }
-
-  return new Intl.NumberFormat("pt-BR", {
-    style: "currency",
-    currency: "BRL",
-    maximumFractionDigits: 0
-  }).format(value);
 }
