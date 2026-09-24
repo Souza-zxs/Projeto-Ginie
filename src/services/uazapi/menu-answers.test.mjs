@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { MENU_CHOICE_ROWS } from "./menu-bot.ts";
+import { CANDIDACY, MENU_CHOICE_ROWS } from "./menu-bot.ts";
 import { describeClientStatus, detectMenuProgress, detectMenuTopic, displayAnswer, extractMenuAnswers, splitMenuRequests } from "./menu-answers.ts";
 
 const bot = (step, content = "pergunta") => ({ direction: "outbound", content, menu_step: step });
@@ -300,4 +300,129 @@ test("opção do menu recusada (o bot repetiu o menu) não conta como resposta",
   const messages = [bot("menu"), client("#"), bot("menu_retry"), client("2"), bot("awaiting_2")];
 
   assert.deepEqual(extractMenuAnswers(messages), [{ question: "Opção do menu", answer: "Formação" }]);
+});
+
+test("os rótulos das respostas da candidatura acompanham as perguntas do bot", () => {
+  for (const item of CANDIDACY) {
+    const [answer] = extractMenuAnswers([bot(item.step), client("resposta")]);
+
+    assert.equal(answer?.question, item.label, item.step);
+  }
+});
+
+test("'voltar' na candidatura apaga a resposta da pergunta anterior, uma etapa de cada vez", () => {
+  const messages = [
+    bot("awaiting_3_name"), client("Ana Silva"),
+    bot("awaiting_3_age"), client("Sim"),
+    bot("awaiting_3_q1"), client("Não"),
+    bot("awaiting_3_q2"), client("← Voltar"),
+    bot("awaiting_3_q1"), client("Sim"),
+    bot("awaiting_3_q2")
+  ];
+
+  assert.deepEqual(extractMenuAnswers(messages), [
+    { question: "Nome", answer: "Ana Silva" },
+    { question: "Tem 18 anos ou mais", answer: "Sim" },
+    { question: "Experiência como cuidador(a)", answer: "Sim" }
+  ]);
+});
+
+test("resposta confusa repetida pelo bot na mesma pergunta não conta; só a aceita", () => {
+  const messages = [
+    bot("awaiting_3_q2"), client("talvez"),
+    bot("awaiting_3_q2"), client("Sim"),
+    bot("awaiting_3_q3")
+  ];
+
+  assert.deepEqual(extractMenuAnswers(messages), [{ question: "Autorização para trabalhar em Portugal", answer: "Sim" }]);
+});
+
+test("recusa: pedido 'declined', motivo lido dos 'Não' e estado 'Não avança: motivo'", () => {
+  const messages = stamped([
+    bot("menu"), client("Candidatura"),
+    bot("awaiting_3_name"), client("Ana Silva"),
+    bot("awaiting_3_age"), client("Sim"),
+    bot("awaiting_3_q1"), client("Sim"),
+    bot("awaiting_3_q2"), client("Não"),
+    bot("awaiting_3_q3"), client("Não"),
+    bot("awaiting_3_q4"), client("Sim"),
+    bot("declined"), client("obrigada")
+  ]);
+  const [request] = splitMenuRequests(messages);
+
+  assert.equal(request.progress, "declined");
+  assert.equal(request.topic, "recruitment");
+  assert.equal(request.declineReason, "sem autorização de trabalho, não aceita recibos verdes");
+  assert.equal(request.afterHandoff, 0);
+  assert.deepEqual(describeClientStatus("declined", true, request.declineReason), {
+    label: "Não avança: sem autorização de trabalho, não aceita recibos verdes",
+    tone: "muted"
+  });
+  assert.equal(describeClientStatus("declined", true).label, "Não avança");
+});
+
+test("recusa pela idade, e 'voltar' na recusa desfaz o 'Não'", () => {
+  const byAge = [bot("awaiting_3_age"), client("Não"), bot("declined")];
+
+  assert.equal(splitMenuRequests(byAge)[0].declineReason, "menos de 18 anos");
+
+  const undone = [...byAge, client("voltar"), bot("awaiting_3_age")];
+
+  assert.deepEqual(extractMenuAnswers(undone), []);
+
+  const afterQ4 = [
+    bot("awaiting_3_q3"), client("Sim"),
+    bot("awaiting_3_q4"), client("Não"),
+    bot("declined"), client("← Voltar"),
+    bot("awaiting_3_q4")
+  ];
+
+  assert.deepEqual(extractMenuAnswers(afterQ4), [{ question: "Recibos verdes", answer: "Sim" }]);
+});
+
+test("o menu depois de uma recusa abre um pedido novo", () => {
+  const messages = stamped([
+    bot("awaiting_3_age"), client("Não"), bot("declined"),
+    client("menu"), bot("menu"),
+    client("Formação"), bot("awaiting_2")
+  ]);
+  const requests = splitMenuRequests(messages);
+
+  assert.equal(requests.length, 2);
+  assert.equal(requests[0].progress, "declined");
+  assert.equal(requests[1].topic, "training");
+});
+
+test("sim/não mapeados: ids da lista e do rótulo antigo", () => {
+  assert.equal(displayAnswer("Recibos verdes", "yes"), "Sim");
+  assert.equal(displayAnswer("Recibos verdes", "no"), "Não");
+  assert.equal(displayAnswer("Disponibilidade", "a3"), "Semana e fim de semana");
+});
+
+test("nome e horário escritos entre parênteses aparecem sem eles", () => {
+  const messages = [
+    bot("awaiting_3_name"), client("(Ana Maria Silva)"),
+    bot("awaiting_3_hours"), client("( manhãs, das 9h às 13h )"),
+    bot("awaiting_3_p4"), client("Sim")
+  ];
+
+  assert.deepEqual(extractMenuAnswers(messages), [
+    { question: "Nome", answer: "Ana Maria Silva" },
+    { question: "Horário pretendido", answer: "manhãs, das 9h às 13h" },
+    { question: "Carta de condução ou viatura", answer: "Sim" }
+  ]);
+  assert.equal(displayAnswer("Nome", "Ana Silva"), "Ana Silva");
+  assert.equal(displayAnswer("Localidade", "(Benfica, Lisboa)"), "Benfica, Lisboa");
+  assert.equal(displayAnswer("Curso", "(x)"), "(x)");
+});
+
+test("localidade entre parênteses aparece sem eles, também quando escrita de novo na confirmação", () => {
+  const messages = [
+    bot("awaiting_1_zone"), client("(Benfica, Lisboa)"),
+    bot("awaiting_1_confirm"), client("(Porto)"),
+    bot("awaiting_1_confirm"), client("Sim"),
+    bot("done")
+  ];
+
+  assert.deepEqual(extractMenuAnswers(messages), [{ question: "Localidade", answer: "Porto" }]);
 });

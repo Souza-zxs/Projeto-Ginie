@@ -32,7 +32,22 @@ const QUESTION_BY_STEP: Record<string, string> = {
   awaiting_2: "Curso",
   awaiting_3: "Experiência ou formação",
   awaiting_3_details: "Nome e zona",
-  awaiting_3_details_retry: "Nome e zona"
+  awaiting_3_details_retry: "Nome e zona",
+  awaiting_3_name: "Nome",
+  awaiting_3_name_retry: "Nome",
+  awaiting_3_age: "Tem 18 anos ou mais",
+  awaiting_3_q1: "Experiência como cuidador(a)",
+  awaiting_3_q2: "Autorização para trabalhar em Portugal",
+  awaiting_3_q3: "Recibos verdes",
+  awaiting_3_q4: "Vive em Lisboa ou Grande Lisboa",
+  awaiting_3_p1: "Mais de 1 ano de experiência",
+  awaiting_3_p2: "Cuidados a pessoas acamadas",
+  awaiting_3_p3: "Formação na área",
+  awaiting_3_avail: "Disponibilidade",
+  awaiting_3_hours: "Horário pretendido",
+  awaiting_3_hours_retry: "Horário pretendido",
+  awaiting_3_p4: "Carta de condução ou viatura",
+  awaiting_3_p5: "Referências"
 };
 
 // Respostas antigas foram gravadas com o código do item da lista (ex.: "u2") em vez do rótulo.
@@ -62,7 +77,12 @@ const CHOICE_LABELS: Record<string, string> = {
   e3: "Experiência e formação",
   e4: "Ainda sem experiência",
   other: "Outro",
-  back: "← Voltar"
+  back: "← Voltar",
+  yes: "Sim",
+  no: "Não",
+  a1: "Semana",
+  a2: "Fim de semana",
+  a3: "Semana e fim de semana"
 };
 
 const MENU_OPTION_LABELS: Record<string, string> = {
@@ -75,6 +95,15 @@ const MENU_OPTION_LABELS: Record<string, string> = {
 /** Texto legível de uma resposta: troca códigos de lista e números do menu pelos rótulos. */
 export function displayAnswer(question: string, answer: string) {
   const key = answer.trim();
+
+  // Perguntas escritas pedem a resposta entre parênteses, ex.: "(Ana Maria Silva)". Ao mostrar, sem eles.
+  if (question === "Nome" || question === "Horário pretendido" || question === "Localidade") {
+    const inner = key.match(/^\(\s*([^()]+?)\s*\)$/)?.[1];
+
+    if (inner) {
+      return inner;
+    }
+  }
 
   if (question === "Opção do menu" && MENU_OPTION_LABELS[key]) {
     return MENU_OPTION_LABELS[key];
@@ -93,7 +122,22 @@ const DISCARDED_BY_BACK: Record<string, string> = {
   awaiting_1_zone: "Urgência",
   awaiting_1_zone_retry: "Urgência",
   awaiting_3_details: "Experiência ou formação",
-  awaiting_3_details_retry: "Experiência ou formação"
+  awaiting_3_details_retry: "Experiência ou formação",
+  awaiting_3_name: "Opção do menu",
+  awaiting_3_name_retry: "Opção do menu",
+  awaiting_3_age: "Nome",
+  awaiting_3_q1: "Tem 18 anos ou mais",
+  awaiting_3_q2: "Experiência como cuidador(a)",
+  awaiting_3_q3: "Autorização para trabalhar em Portugal",
+  awaiting_3_q4: "Recibos verdes",
+  awaiting_3_p1: "Vive em Lisboa ou Grande Lisboa",
+  awaiting_3_p2: "Mais de 1 ano de experiência",
+  awaiting_3_p3: "Cuidados a pessoas acamadas",
+  awaiting_3_avail: "Formação na área",
+  awaiting_3_hours: "Disponibilidade",
+  awaiting_3_hours_retry: "Disponibilidade",
+  awaiting_3_p4: "Horário pretendido",
+  awaiting_3_p5: "Carta de condução ou viatura"
 };
 
 // Etapas de confirmação: o que a pessoa respondeu não vira "resposta" própria. O que vale é o
@@ -134,7 +178,9 @@ function isBackAnswer(text: string) {
 const RETRY_STEP_OF: Record<string, string> = {
   menu: "menu_retry",
   awaiting_1_zone: "awaiting_1_zone_retry",
-  awaiting_3_details: "awaiting_3_details_retry"
+  awaiting_3_details: "awaiting_3_details_retry",
+  awaiting_3_name: "awaiting_3_name_retry",
+  awaiting_3_hours: "awaiting_3_hours_retry"
 };
 
 function nextBotStep(messages: MenuHistoryMessage[], position: number) {
@@ -165,6 +211,20 @@ function walkMenu(messages: MenuHistoryMessage[]): { answers: MenuAnswer[]; afte
       continue;
     }
 
+    // Depois de recusada a candidatura: "voltar" desfaz a resposta que a levou à recusa; o resto é ignorado.
+    if (pendingStep === "declined") {
+      if (text && isBackAnswer(text)) {
+        const last = answers[answers.length - 1];
+
+        truncateFrom(
+          answers,
+          last?.question === "Tem 18 anos ou mais" ? "Tem 18 anos ou mais" : "Vive em Lisboa ou Grande Lisboa"
+        );
+      }
+
+      continue;
+    }
+
     const confirmStep: ConfirmStep | undefined = pendingStep ? CONFIRM_STEPS[pendingStep] : undefined;
 
     if (confirmStep) {
@@ -174,7 +234,7 @@ function walkMenu(messages: MenuHistoryMessage[]): { answers: MenuAnswer[]; afte
         truncateFrom(answers, confirmStep.question);
       } else if (nextStep === pendingStep && text) {
         truncateFrom(answers, confirmStep.question);
-        answers.push({ question: confirmStep.question, answer: text });
+        answers.push({ question: confirmStep.question, answer: displayAnswer(confirmStep.question, text) });
       } else if (nextStep === confirmStep.backTo) {
         truncateFrom(answers, confirmStep.backDiscards);
       }
@@ -188,8 +248,10 @@ function walkMenu(messages: MenuHistoryMessage[]): { answers: MenuAnswer[]; afte
       truncateFrom(answers, DISCARDED_BY_BACK[pendingStep]);
     } else if (question && text) {
       const retry = pendingStep ? RETRY_STEP_OF[pendingStep] : undefined;
+      const next = nextBotStep(messages, position);
 
-      if (!retry || nextBotStep(messages, position) !== retry) {
+      // Se o bot repetiu a mesma pergunta (ou passou para a "nova tentativa"), a resposta foi recusada.
+      if (next !== pendingStep && (!retry || next !== retry)) {
         answers.push({ question, answer: displayAnswer(question, text) });
       }
     } else if (pendingStep === "done" && text) {
@@ -230,20 +292,26 @@ export function detectMenuTopic(messages: MenuHistoryMessage[]): MenuTopic | nul
   return topic;
 }
 
-export type MenuProgress = "in_progress" | "handed_off" | "no_menu";
+export type MenuProgress = "in_progress" | "handed_off" | "declined" | "no_menu";
 
 export function detectMenuProgress(messages: MenuHistoryMessage[]): MenuProgress {
   const lastStep = [...messages].reverse().find((message) => message.menu_step)?.menu_step ?? null;
 
   if (!lastStep) return "no_menu";
 
+  if (lastStep === "declined") return "declined";
+
   return lastStep === "done" ? "handed_off" : "in_progress";
 }
 
-export type ClientStatus = { label: string; tone: "default" | "warning" | "success" };
+export type ClientStatus = { label: string; tone: "default" | "warning" | "success" | "muted" };
 
 /** Estado mostrado ao lado do cliente: cruza o ponto do menu com o bot estar ativo ou pausado. */
-export function describeClientStatus(progress: MenuProgress, botActive: boolean): ClientStatus {
+export function describeClientStatus(progress: MenuProgress, botActive: boolean, declineReason?: string | null): ClientStatus {
+  if (progress === "declined") {
+    return { label: declineReason ? `Não avança: ${declineReason}` : "Não avança", tone: "muted" };
+  }
+
   if (progress === "handed_off") {
     return { label: "Encaminhado para a equipa", tone: "warning" };
   }
@@ -255,12 +323,36 @@ export function describeClientStatus(progress: MenuProgress, botActive: boolean)
   return { label: "A responder ao bot", tone: "default" };
 }
 
+const DECLINE_REASONS: Record<string, string> = {
+  "Tem 18 anos ou mais": "menos de 18 anos",
+  "Autorização para trabalhar em Portugal": "sem autorização de trabalho",
+  "Recibos verdes": "não aceita recibos verdes",
+  "Vive em Lisboa ou Grande Lisboa": "fora de Lisboa"
+};
+
+function isNoText(text: string) {
+  return /^(nao|n|no)(\s|,|$)/.test(text.normalize("NFKD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim());
+}
+
+/** Motivos da recusa, lidos das respostas "Não" às eliminatórias. */
+function declineReasonOf(progress: MenuProgress, answers: MenuAnswer[]) {
+  if (progress !== "declined") {
+    return null;
+  }
+
+  const reasons = answers.filter((item) => DECLINE_REASONS[item.question] && isNoText(item.answer)).map((item) => DECLINE_REASONS[item.question]);
+
+  return reasons.length ? reasons.join(", ") : null;
+}
+
 export type MenuRequest = {
   /** Data da primeira mensagem do pedido. */
   startedAt: string | null;
   topic: MenuTopic | null;
   progress: MenuProgress;
   answers: MenuAnswer[];
+  /** Motivo, quando a candidatura foi recusada (ex.: "sem autorização de trabalho"). */
+  declineReason: string | null;
   /** Mensagens que a pessoa mandou depois de encaminhada (ex.: "Olá", "Obrigada"). */
   afterHandoff: number;
 };
@@ -275,7 +367,7 @@ export function splitMenuRequests(messages: MenuHistoryMessage[]): MenuRequest[]
   let lastBotStep: string | null = null;
 
   for (const message of messages) {
-    if (message.direction === "outbound" && message.menu_step === "menu" && lastBotStep === "done") {
+    if (message.direction === "outbound" && message.menu_step === "menu" && (lastBotStep === "done" || lastBotStep === "declined")) {
       const current = segments[segments.length - 1];
       let cut = current.length;
 
@@ -296,10 +388,16 @@ export function splitMenuRequests(messages: MenuHistoryMessage[]): MenuRequest[]
 
   return segments
     .filter((segment) => segment.length)
-    .map((segment) => ({
-      startedAt: segment.find((message) => message.created_at)?.created_at ?? null,
-      topic: detectMenuTopic(segment),
-      progress: detectMenuProgress(segment),
-      ...walkMenu(segment)
-    }));
+    .map((segment) => {
+      const progress = detectMenuProgress(segment);
+      const walked = walkMenu(segment);
+
+      return {
+        startedAt: segment.find((message) => message.created_at)?.created_at ?? null,
+        topic: detectMenuTopic(segment),
+        progress,
+        ...walked,
+        declineReason: declineReasonOf(progress, walked.answers)
+      };
+    });
 }

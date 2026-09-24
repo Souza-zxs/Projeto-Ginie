@@ -1,6 +1,7 @@
 import Link from "next/link";
 import type { Route } from "next";
 import {
+  AlertTriangle,
   Bot,
   Clock3,
   FileText,
@@ -23,6 +24,7 @@ import {
 } from "@/services/uazapi/menu-answers";
 import { computeAwaitingSince, formatWaiting } from "@/services/uazapi/awaiting-team";
 import { loadConversationHistory } from "@/services/uazapi/history";
+import { getUazapiLinesStatus } from "@/services/uazapi/lines-status";
 import { AgentTester } from "./agent-tester";
 import { AutoRefresh } from "@/components/auto-refresh";
 import { ChatMessages } from "./chat-messages";
@@ -52,6 +54,7 @@ type MessageRow = {
   status: string;
   created_at: string;
   menu_step: string | null;
+  send_error: string | null;
 };
 
 type SearchParams = {
@@ -119,6 +122,20 @@ export default async function InboxPage({
   }
 
   const renderedAt = nowMs();
+
+  // Envios que falharam nas últimas 24 h e linhas desconectadas: a equipa precisa ver antes de
+  // o cliente reclamar.
+  const { data: failedSends } = await supabase
+    .from("messages")
+    .select("conversation_id")
+    .eq("organization_id", profile.organization_id)
+    .eq("direction", "outbound")
+    .eq("status", "failed")
+    .gte("created_at", new Date(renderedAt - 24 * 3_600_000).toISOString())
+    .limit(500)
+    .returns<Array<{ conversation_id: string }>>();
+  const failedConversationIds = new Set((failedSends ?? []).map((row) => row.conversation_id));
+  const disconnectedLines = (await getUazapiLinesStatus(profile.organization_id)).filter((line) => line.state === "disconnected");
   const filteredConversations = allConversations.filter((conversation) => {
     const haystack = [
       conversation.contacts?.name,
@@ -145,7 +162,7 @@ export default async function InboxPage({
   const { data: messages } = activeConversation
     ? await supabase
         .from("messages")
-        .select("id, direction, type, content, media_url, status, created_at, menu_step:payload->>menu_step")
+        .select("id, direction, type, content, media_url, status, created_at, menu_step:payload->>menu_step, send_error:payload->>send_error")
         .eq("organization_id", profile.organization_id)
         .eq("conversation_id", activeConversation.id)
         .order("created_at", { ascending: true })
@@ -154,7 +171,6 @@ export default async function InboxPage({
 
   const openCount = allConversations.filter((conversation) => conversation.status !== "closed").length;
   const aiCount = allConversations.filter((conversation) => conversation.ai_enabled).length;
-  const uazapiCount = allConversations.filter((conversation) => conversation.channel === "uazapi").length;
 
   return (
     <>
@@ -164,11 +180,22 @@ export default async function InboxPage({
       />
       <AutoRefresh intervalMs={5_000} />
 
+      {disconnectedLines.map((line) => (
+        <div key={line.id} role="alert" className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-900">
+          <span>
+            <strong>A linha «{line.name}» está desconectada.</strong> As mensagens não chegam nem saem até ela ser reconectada.
+          </span>
+          <Link href={"/settings/integrations" as Route} className="rounded-md border border-red-300 bg-white px-3 py-1.5 text-xs font-semibold text-red-800 hover:bg-red-100">
+            Reconectar
+          </Link>
+        </div>
+      ))}
+
       <section className="mb-5 grid gap-3 md:grid-cols-4">
         <Metric icon={<MessageCircle className="h-4 w-4" />} label="Abertas" value={String(openCount)} />
         <Metric icon={<Bot className="h-4 w-4" />} label="IA ativa" value={String(aiCount)} />
         <Metric icon={<Clock3 className="h-4 w-4" />} label="Aguardando equipa" value={String(awaitingSince.size)} />
-        <Metric icon={<Phone className="h-4 w-4" />} label="Uazapi" value={String(uazapiCount)} />
+        <Metric icon={<AlertTriangle className="h-4 w-4" />} label="Envios falhados (24 h)" value={String(failedSends?.length ?? 0)} />
       </section>
 
       <div className="mb-5">
@@ -224,6 +251,7 @@ export default async function InboxPage({
                   key={conversation.id}
                   conversation={conversation}
                   active={conversation.id === activeConversation?.id}
+                  sendFailed={failedConversationIds.has(conversation.id)}
                   waitingMs={awaitingSince.has(conversation.id) ? renderedAt - (awaitingSince.get(conversation.id) as Date).getTime() : null}
                   href={buildInboxHref({
                     conversation: conversation.id,
@@ -328,10 +356,13 @@ function ConversationItem({
   conversation,
   active,
   waitingMs,
+  sendFailed,
   href
 }: {
   conversation: ConversationRow;
   active: boolean;
+  /** Houve mensagem do bot ou da equipa que não foi enviada nas últimas 24 h. */
+  sendFailed: boolean;
   /** Há quanto tempo espera resposta da equipa; null se não espera. */
   waitingMs: number | null;
   href: Route;
@@ -369,6 +400,7 @@ function ConversationItem({
             <Badge tone={conversation.ai_enabled ? "success" : "muted"}>
               IA {conversation.ai_enabled ? "on" : "off"}
             </Badge>
+            {sendFailed ? <Badge tone="danger">Envio falhou</Badge> : null}
             {waitingMs !== null ? (
               <Badge tone={waitingMs >= 2 * 3_600_000 ? "danger" : "warning"}>
                 Sem resposta há {formatWaiting(waitingMs)}
@@ -430,27 +462,35 @@ function ConversationActions({ conversation, canManage }: { conversation: Conver
 
 function MessageBubble({ message }: { message: MessageRow }) {
   const outbound = message.direction === "outbound";
+  const failed = outbound && message.status === "failed";
 
   return (
     <div className={cn("flex", outbound ? "justify-end" : "justify-start")}>
       <div
         className={cn(
           "max-w-[78%] rounded-lg px-4 py-3 text-sm shadow-sm",
-          outbound
-            ? "bg-teal-700 text-white"
-            : "border border-slate-200 bg-white text-slate-900"
+          failed
+            ? "border border-red-300 bg-red-50 text-red-900"
+            : outbound
+              ? "bg-teal-700 text-white"
+              : "border border-slate-200 bg-white text-slate-900"
         )}
       >
         <MessageBody message={message} />
+        {failed ? (
+          <p className="mt-2 text-xs font-semibold">
+            Não enviada{message.send_error ? `: ${message.send_error}` : "."}
+          </p>
+        ) : null}
         <div
           className={cn(
             "mt-2 flex items-center gap-2 text-[11px]",
-            outbound ? "text-teal-50/80" : "text-muted-foreground"
+            failed ? "text-red-800/80" : outbound ? "text-teal-50/80" : "text-muted-foreground"
           )}
         >
           <Clock3 className="h-3 w-3" />
           <span>{formatMessageTime(message.created_at)}</span>
-          <span>{message.status}</span>
+          <span>{failed ? "falhou" : message.status}</span>
         </div>
       </div>
     </div>
@@ -490,8 +530,8 @@ function ClientPanel({
           <div className="flex flex-wrap gap-2">
             {topic ? <Badge tone="muted">{TOPIC_LABELS[topic]}</Badge> : null}
             {progress !== "no_menu" ? (
-              <Badge tone={describeClientStatus(progress, conversation.ai_enabled).tone}>
-                {describeClientStatus(progress, conversation.ai_enabled).label}
+              <Badge tone={describeClientStatus(progress, conversation.ai_enabled, latest?.declineReason).tone}>
+                {describeClientStatus(progress, conversation.ai_enabled, latest?.declineReason).label}
               </Badge>
             ) : null}
           </div>

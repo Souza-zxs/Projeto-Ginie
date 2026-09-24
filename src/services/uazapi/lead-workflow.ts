@@ -11,7 +11,7 @@ import {
 import { getKnownLeadFacts, upsertLeadFromQualification } from "@/services/leads/workflow";
 import { isNightTime } from "@/lib/service-hours";
 import { shouldResumeBot } from "@/services/uazapi/bot-resume";
-import { decideMenuReply, readMenuStep } from "@/services/uazapi/menu-bot";
+import { DEFAULT_RECRUITMENT_FORM_URL, decideMenuReply, readMenuStep } from "@/services/uazapi/menu-bot";
 import { sendUazapiList, sendUazapiMessage } from "@/services/uazapi/send-message";
 
 type AgentConfig = {
@@ -310,6 +310,8 @@ async function runMenuBot({
     .eq("organization_id", organizationId)
     .eq("conversation_id", conversationId)
     .eq("direction", "outbound")
+    // Só mensagens do bot com etapa: uma que falhou no envio ou a da equipa não mudam o estado.
+    .not("payload->>menu_step", "is", null)
     .order("created_at", { ascending: false })
     .limit(1)
     .maybeSingle<{ payload: Record<string, unknown> | null }>();
@@ -321,7 +323,8 @@ async function runMenuBot({
     isMedia,
     mediaRetry: !restart && lastOutbound?.payload?.media_retry === true,
     night: isNightTime(),
-    recruitmentFormUrl: process.env.RECRUITMENT_FORM_URL || null
+    candidacyFails: restart ? [] : (Array.isArray(lastOutbound?.payload?.candidacy_fails) ? (lastOutbound?.payload?.candidacy_fails as string[]) : []),
+    recruitmentFormUrl: process.env.RECRUITMENT_FORM_URL || DEFAULT_RECRUITMENT_FORM_URL
   });
   const uazapiConfig = await getUazapiIntegrationConfig(supabase, organizationId, instance);
 
@@ -330,36 +333,80 @@ async function runMenuBot({
     token: configString(uazapiConfig, ["token", "apiKey", "api_key"], process.env.UAZAPI_TOKEN) ?? undefined
   };
 
+  let sentCount = 0;
+  let sendError: string | null = null;
+
   for (const reply of decision.replies) {
-    let result: unknown;
-    let sentAs = "text";
+    try {
+      let result: unknown;
+      let sentAs = "text";
 
-    if (decision.list) {
-      // Lista clicável; se a Uazapi recusar (ou o aparelho não a suportar no envio), cai no
-      // menu numerado em texto, que a pessoa responde digitando.
-      try {
-        result = await sendUazapiList({ phone, ...decision.list, integrationConfig });
-        sentAs = "list";
-      } catch {
-        result = null;
+      if (decision.list) {
+        // Lista clicável; se a Uazapi recusar (ou o aparelho não a suportar no envio), cai no
+        // menu numerado em texto, que a pessoa responde digitando.
+        try {
+          result = await sendUazapiList({ phone, ...decision.list, integrationConfig });
+          sentAs = "list";
+        } catch {
+          result = null;
+        }
       }
-    }
 
-    if (result === null || result === undefined) {
-      result = await sendUazapiMessage({ phone, text: reply, integrationConfig });
-    }
+      if (result === null || result === undefined) {
+        result = await sendUazapiMessage({ phone, text: reply, integrationConfig });
+      }
 
-    await supabase.from("messages").insert({
+      await supabase.from("messages").insert({
+        organization_id: organizationId,
+        conversation_id: conversationId,
+        contact_id: contactId,
+        direction: "outbound",
+        channel: "uazapi",
+        type: "text",
+        content: reply,
+        status: "sent",
+        payload: {
+          menu_step: decision.nextStep,
+          sent_as: sentAs,
+          media_retry: decision.mediaRetry === true,
+          ...(decision.candidacyFails ? { candidacy_fails: decision.candidacyFails } : {}),
+          result
+        }
+      });
+      sentCount += 1;
+    } catch (error) {
+      sendError = error instanceof Error ? error.message : "Erro desconhecido.";
+
+      // Fica visível no Inbox como "não enviada". Sem menu_step de propósito: o estado do
+      // menu não avança para uma pergunta que a pessoa nunca recebeu.
+      await supabase.from("messages").insert({
+        organization_id: organizationId,
+        conversation_id: conversationId,
+        contact_id: contactId,
+        direction: "outbound",
+        channel: "uazapi",
+        type: "text",
+        content: reply,
+        status: "failed",
+        payload: { send_error: sendError.slice(0, 300) }
+      });
+      break;
+    }
+  }
+
+  if (sendError) {
+    await supabase.from("webhook_logs").insert({
       organization_id: organizationId,
-      conversation_id: conversationId,
-      contact_id: contactId,
-      direction: "outbound",
-      channel: "uazapi",
-      type: "text",
-      content: reply,
-      status: "sent",
-      payload: { menu_step: decision.nextStep, sent_as: sentAs, media_retry: decision.mediaRetry === true, result }
+      provider: "uazapi",
+      event_type: "send_failed",
+      payload: { conversationId, error: sendError.slice(0, 300) },
+      status: "failed"
     });
+  }
+
+  // Nada chegou à pessoa: não avança o estado nem encaminha. Só a equipa, vendo o aviso, resolve.
+  if (sentCount === 0 && sendError) {
+    return { processed: true, ai: false, menu: "send_failed", conversationId };
   }
 
   await supabase

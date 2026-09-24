@@ -132,7 +132,7 @@ export default async function ClientsPage({ searchParams }: { searchParams: Prom
       {clients.length ? (
         <div className="grid items-start gap-4 lg:grid-cols-2">
           {clients.map(({ conversation, latest, previous, awaitingSince }) => {
-            const status = describeClientStatus(latest?.progress ?? "no_menu", conversation.ai_enabled);
+            const status = describeClientStatus(latest?.progress ?? "no_menu", conversation.ai_enabled, latest?.declineReason);
             const waitingMs = awaitingSince ? renderedAt - awaitingSince.getTime() : null;
 
             return (
