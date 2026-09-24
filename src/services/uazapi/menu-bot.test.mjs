@@ -10,6 +10,7 @@ import {
   decideMenuReply,
   detectMenuIntent,
   isSmallTalk,
+  withTapHint,
   parseMenuChoice,
   readMenuStep
 } from "./menu-bot.ts";
@@ -186,9 +187,13 @@ test("formação: escolher um curso cita o nome e passa para a equipa", () => {
   assert.equal(picked.replies[0], "Obrigada pelo interesse em Técnico de Geriatria!");
   assert.equal(picked.replies[1], HANDOFF_DAY);
 
+  // Escrito por extenso também é entendido.
   const typed = decideMenuReply({ lastStep: "awaiting_2", text: "quero o de geriatria", night: false });
 
-  assert.deepEqual(typed.replies, [HANDOFF_DAY]);
+  assert.deepEqual(typed.replies, ["Obrigada pelo interesse em Técnico de Geriatria!", HANDOFF_DAY]);
+
+  // Texto com conteúdo mas sem curso identificado segue para a equipa (ela lê o que a pessoa escreveu).
+  assert.deepEqual(decideMenuReply({ lastStep: "awaiting_2", text: "quero saber os preços", night: false }).replies, [HANDOFF_DAY]);
 });
 
 test("opção 2 lista os cursos sem preços", () => {
@@ -199,29 +204,40 @@ test("opção 2 lista os cursos sem preços", () => {
   assert.doesNotMatch(text, /€/);
 });
 
-test("resposta inválida repete o menu uma vez e depois passa para a equipa", () => {
+test("resposta inválida no menu é explicada duas vezes e só na terceira passa para a equipa", () => {
   const first = decideMenuReply({ lastStep: "menu", text: "bom dia, queria saber preços", night: false });
 
-  assert.equal(first.nextStep, "menu_retry");
+  assert.equal(first.nextStep, "menu");
+  assert.equal(first.unclearCount, 1);
   assert.equal(first.handoff, false);
-  assert.match(first.replies[0], /1️⃣/);
+  assert.match(first.replies[0], /Desculpe, não consegui perceber\. Toque no botão “Ver opções”/);
+  assert.match(first.list.text, /Toque no botão “Ver opções” aqui em baixo e escolha uma opção, ou escreva por exemplo “quero saber os cursos”/);
 
-  const second = decideMenuReply({ lastStep: "menu_retry", text: "ainda não percebi", night: false });
+  const second = decideMenuReply({ lastStep: "menu", text: "ainda não percebi", unclearCount: 1, night: false });
 
-  assert.equal(second.handoff, true);
-  assert.deepEqual(second.replies, [HANDOFF_DAY]);
+  assert.equal(second.unclearCount, 2);
+  assert.equal(second.handoff, false);
 
-  const recovered = decideMenuReply({ lastStep: "menu_retry", text: "2", night: false });
+  const third = decideMenuReply({ lastStep: "menu", text: "não sei", unclearCount: 2, night: false });
+
+  assert.deepEqual(third, { replies: [HANDOFF_DAY], nextStep: "done", handoff: true, gaveUp: true });
+
+  // Conversas antigas em "menu_retry" já gastaram uma tentativa.
+  assert.equal(decideMenuReply({ lastStep: "menu_retry", text: "não sei", night: false }).unclearCount, 2);
+  assert.equal(decideMenuReply({ lastStep: "menu_retry", text: "não sei", unclearCount: 2, night: false }).handoff, true);
+
+  const recovered = decideMenuReply({ lastStep: "menu", text: "2", unclearCount: 2, night: false });
 
   assert.equal(recovered.nextStep, "awaiting_2");
 });
+
 const yes = { text: "Sim", choiceId: "yes" };
 const no = { text: "Não", choiceId: "no" };
 const avail = (id, text) => ({ text, choiceId: id });
 
 /** Conversa simulada: cada resposta usa o estado que a decisão anterior deixou (etapa, "Não" guardados, pedido de repetição). */
 function chat(inputs, options = {}) {
-  let state = { lastStep: "menu", fails: [], mediaRetry: false };
+  let state = { lastStep: "menu", fails: [], mediaRetry: false, unclearCount: 0 };
   const decisions = [];
 
   for (const input of inputs) {
@@ -232,13 +248,19 @@ function chat(inputs, options = {}) {
       choiceId: value.choiceId,
       isMedia: value.isMedia,
       mediaRetry: state.mediaRetry,
+      unclearCount: state.unclearCount,
       candidacyFails: state.fails,
       night: false,
       ...options
     });
 
     decisions.push(decision);
-    state = { lastStep: decision.nextStep, fails: decision.candidacyFails ?? [], mediaRetry: decision.mediaRetry === true };
+    state = {
+      lastStep: decision.nextStep,
+      fails: decision.candidacyFails ?? [],
+      mediaRetry: decision.mediaRetry === true,
+      unclearCount: decision.unclearCount ?? 0
+    };
   }
 
   return decisions;
@@ -405,8 +427,8 @@ test("depois da recusa, qualquer mensagem só recebe a dica; 'menu' recomeça", 
   assert.equal(restart.nextStep, "menu");
 });
 
-test("sim/não digitados são entendidos; resposta confusa repete uma vez e depois passa para a equipa", () => {
-  for (const text of ["sim", "Sim, tenho", "não", "Não tenho", "nao"]) {
+test("sim/não digitados são entendidos; resposta confusa é explicada duas vezes e só na terceira passa para a equipa", () => {
+  for (const text of ["sim", "Sim, tenho", "não", "Não tenho", "nao", "com certeza", "claro que sim", "nunca", "ainda não", "negativo"]) {
     // Na Q1 (eliminatória) "Não" é guardado e a pergunta seguinte vem sem recusa.
     assert.equal(decideMenuReply({ lastStep: "awaiting_3_q1", text, night: false }).nextStep, "awaiting_3_q2", text);
   }
@@ -414,16 +436,29 @@ test("sim/não digitados são entendidos; resposta confusa repete uma vez e depo
   assert.deepEqual(decideMenuReply({ lastStep: "awaiting_3_q1", text: "Não tenho", night: false }).candidacyFails, ["q1"]);
   assert.deepEqual(decideMenuReply({ lastStep: "awaiting_3_q1", text: "Sim, tenho", night: false }).candidacyFails, []);
 
-  const unclear = decideMenuReply({ lastStep: "awaiting_3_q2", text: "talvez", candidacyFails: ["q1"], night: false });
+  const first = decideMenuReply({ lastStep: "awaiting_3_q2", text: "talvez", candidacyFails: ["q1"], night: false });
 
-  assert.equal(unclear.nextStep, "awaiting_3_q2");
-  assert.equal(unclear.mediaRetry, true);
-  assert.deepEqual(unclear.candidacyFails, ["q1"]);
-  assert.ok(unclear.list);
+  assert.equal(first.nextStep, "awaiting_3_q2");
+  assert.equal(first.unclearCount, 1);
+  assert.deepEqual(first.candidacyFails, ["q1"]);
+  assert.match(first.replies[0], /Toque no botão “Responder”/);
+  assert.match(first.replies[0], /escreva só "sim" ou "não"/);
+  assert.match(first.list.text, /Toque no botão “Responder”/);
+  assert.match(first.list.text, /autorização para trabalhar em Portugal/);
 
-  const twice = decideMenuReply({ lastStep: "awaiting_3_q2", text: "sei lá", mediaRetry: true, night: false });
+  const second = decideMenuReply({ lastStep: "awaiting_3_q2", text: "sei lá", unclearCount: 1, night: false });
 
-  assert.deepEqual(twice, { replies: [HANDOFF_DAY], nextStep: "done", handoff: true, gaveUp: true });
+  assert.equal(second.unclearCount, 2);
+  assert.equal(second.handoff, false);
+
+  const third = decideMenuReply({ lastStep: "awaiting_3_q2", text: "quero explicar melhor", unclearCount: 2, night: false });
+
+  assert.deepEqual(third, { replies: [HANDOFF_DAY], nextStep: "done", handoff: true, gaveUp: true });
+
+  // Uma resposta entendida no meio zera a contagem (a decisão seguinte não a carrega).
+  const understood = decideMenuReply({ lastStep: "awaiting_3_q2", text: "sim", unclearCount: 2, night: false });
+
+  assert.equal(understood.unclearCount, undefined);
 });
 
 test("disponibilidade: lista ou texto livre; nome e horário aceitam texto e pedem de novo se vier sem palavras", () => {
@@ -538,7 +573,7 @@ test("voltar sem etapa anterior (menu, encaminhado, sem estado) não quebra nem 
   for (const lastStep of ["menu", "menu_retry", "done", null]) {
     const decision = decideMenuReply({ lastStep, text: "voltar", choiceId: "back", night: false });
 
-    assert.equal(decision.handoff, lastStep === "menu_retry", String(lastStep));
+    assert.equal(decision.handoff, false, String(lastStep));
   }
 });
 
@@ -691,27 +726,28 @@ test("caso real: 'Olá', 'Boa tarde', 'Tudo Bm' seguidos não gastam tentativa n
   assert.equal(decideMenuReply({ lastStep: state, text: "Candidatura", choiceId: "3", night: false }).nextStep, "awaiting_3_name");
 });
 
-test("saudação também não gasta a nova tentativa depois de uma resposta errada", () => {
+test("saudação também não gasta tentativa depois de uma resposta não entendida", () => {
   const retry = decideMenuReply({ lastStep: "menu", text: "quero saber preços", night: false });
 
-  assert.equal(retry.nextStep, "menu_retry");
+  assert.equal(retry.unclearCount, 1);
 
-  const greeting = decideMenuReply({ lastStep: "menu_retry", text: "Boa tarde", night: false });
+  const greeting = decideMenuReply({ lastStep: "menu", text: "Boa tarde", unclearCount: retry.unclearCount, night: false });
 
-  assert.equal(greeting.nextStep, "menu_retry");
+  assert.equal(greeting.smallTalk, true);
   assert.equal(greeting.handoff, false);
+  assert.equal(greeting.unclearCount, undefined);
 
-  // Mas uma segunda resposta errada de verdade continua a passar para a equipa.
-  const invalid = decideMenuReply({ lastStep: "menu_retry", text: "quero saber preços", night: false });
+  // Mas a terceira resposta não entendida de verdade continua a passar para a equipa.
+  const invalid = decideMenuReply({ lastStep: "menu", text: "quero saber preços", unclearCount: 2, night: false });
 
   assert.equal(invalid.handoff, true);
 });
 
 test("desistência do bot é marcada (gaveUp); pedido explícito da equipa e recusa não são", () => {
   const gaveUp = [
-    decideMenuReply({ lastStep: "menu_retry", text: "não sei", night: false }),
+    decideMenuReply({ lastStep: "menu", text: "não sei", unclearCount: 2, night: false }),
     decideMenuReply({ lastStep: "awaiting_1_type", text: "[áudio]", isMedia: true, mediaRetry: true, night: false }),
-    decideMenuReply({ lastStep: "awaiting_3_q2", text: "sei lá", mediaRetry: true, night: false }),
+    decideMenuReply({ lastStep: "awaiting_3_q2", text: "sei lá", unclearCount: 2, night: false }),
     decideMenuReply({ lastStep: "awaiting_3_name_retry", text: "😀", night: false }),
     decideMenuReply({ lastStep: "awaiting_1_zone_retry", text: "👍", night: false })
   ];
@@ -805,5 +841,170 @@ test("se o bot entendeu mal, 'voltar' devolve ao menu; número e saudação cont
 
   // Saudação pura continua a não gastar tentativa; texto sem palavra-chave continua a ser resposta errada.
   assert.equal(decideMenuReply({ lastStep: "menu", text: "Boa tarde", night: false }).smallTalk, true);
-  assert.equal(decideMenuReply({ lastStep: "menu", text: "quero saber preços", night: false }).nextStep, "menu_retry");
+  assert.equal(decideMenuReply({ lastStep: "menu", text: "quero saber preços", night: false }).unclearCount, 1);
+});
+
+test("caso real (Marlene): '24anos', 'Mais de 18', 'tenho 25' respondem à pergunta da idade", () => {
+  for (const text of ["24anos", "24 anos", "tenho 25", "Mais de 18", "sou maior de idade", "18", "nasci em 1990", "Sim", "sim, tenho 30 anos", "De 18 e tal"]) {
+    const decision = decideMenuReply({ lastStep: "awaiting_3_age", text, currentYear: 2026, night: false });
+
+    assert.equal(decision.nextStep, "awaiting_3_q1", text);
+    assert.equal(decision.unclearCount, undefined, text);
+  }
+
+  for (const text of ["17", "17 anos", "menos de 18", "sou menor", "nasci em 2012", "Não"]) {
+    const decision = decideMenuReply({ lastStep: "awaiting_3_age", text, currentYear: 2026, night: false });
+
+    assert.equal(decision.nextStep, "declined", text);
+    assert.match(decision.replies[0], /18 anos/);
+  }
+
+  // O que não dá para ler continua a ser explicado, em vez de encaminhar logo.
+  for (const text of ["Mais", "adulta", "depende"]) {
+    assert.equal(decideMenuReply({ lastStep: "awaiting_3_age", text, currentYear: 2026, night: false }).unclearCount, 1, text);
+  }
+
+  // Tocar na lista continua a valer mais que qualquer texto.
+  assert.equal(decideMenuReply({ lastStep: "awaiting_3_age", text: "Não", choiceId: "no", night: false }).nextStep, "declined");
+});
+
+test("idade só é lida na pergunta da idade (o número 3 numa pergunta sim/não não vira 'sim')", () => {
+  const decision = decideMenuReply({ lastStep: "awaiting_3_q1", text: "3 anos", night: false });
+
+  assert.equal(decision.unclearCount, 1);
+});
+
+test("toda lista diz qual botão tocar, pelo nome do botão; aplicar de novo não repete", () => {
+  const yesNo = decideMenuReply({ lastStep: "awaiting_3_name", text: "Ana Silva", night: false }).list;
+
+  assert.doesNotMatch(yesNo.text, /botão/); // o texto base da pergunta não menciona o botão
+  assert.match(withTapHint(yesNo).text, /👇 Toque no botão “Responder” aqui em baixo para escolher\./);
+  assert.deepEqual(withTapHint(withTapHint(yesNo)), withTapHint(yesNo));
+
+  // Textos que já dizem "toque no botão" passam a dizer o nome do botão, sem duplicar a frase.
+  const menu = decideMenuReply({ lastStep: null, text: "olá", night: false }).list;
+  const hinted = withTapHint(menu);
+
+  assert.match(hinted.text, /toque no botão “Ver opções” e escolha a opção que pretende/);
+  assert.equal(hinted.text.match(/botão/g).length, 1);
+
+  // Vale para todas as listas do bot.
+  for (const list of [
+    decideMenuReply({ lastStep: "menu", text: "1", night: false }).list,
+    decideMenuReply({ lastStep: "menu", text: "2", night: false }).list,
+    decideMenuReply({ lastStep: "awaiting_1_zone", text: "Lisboa", night: false }).list,
+    decideMenuReply({ lastStep: "awaiting_3_p3", text: "Sim", choiceId: "yes", night: false }).list
+  ]) {
+    assert.match(withTapHint(list).text, new RegExp(`botão “${list.listButton}”`));
+  }
+});
+
+test("o aviso do botão vem antes do aviso de voltar", () => {
+  const list = decideMenuReply({ lastStep: "awaiting_3_name", text: "Ana Silva", night: false }).list;
+  const lines = withTapHint(list).text.split("\n");
+
+  assert.match(lines[0], /^Tem 18 anos ou mais\?/);
+  assert.match(lines[1], /^👇 Toque no botão “Responder”/);
+  assert.match(lines[2], /^Se se enganou/);
+});
+
+test("apoio domiciliário: 'para quem' entende o texto escrito", () => {
+  const cases = [
+    "para a minha mãe",
+    "é para mim",
+    "para o meu avô",
+    "para uma amiga",
+    "É para o meu pai, que tem 80 anos"
+  ];
+
+  for (const text of cases) {
+    const decision = decideMenuReply({ lastStep: "awaiting_1", text, night: false });
+
+    assert.equal(decision.nextStep, "awaiting_1_type", text);
+    assert.equal(decision.unclearCount, undefined, text);
+  }
+
+  for (const text of ["Boa tarde", "não sei", "para a minha mãe e para mim"]) {
+    const decision = decideMenuReply({ lastStep: "awaiting_1", text, night: false });
+
+    assert.equal(decision.nextStep, "awaiting_1", text);
+    assert.equal(decision.unclearCount, 1, text);
+    assert.match(decision.list.text, /Toque no botão “Ver opções” aqui em baixo e escolha uma opção, ou escreva por exemplo “para a minha mãe”/, text);
+  }
+});
+
+test("apoio domiciliário: 'tipo de apoio' entende o texto; vários tipos viram 'vários serviços'", () => {
+  for (const text of ["ajuda com a higiene", "preciso de banho e vestir", "medicação", "companhia", "limpeza da casa", "refeições e medicação"]) {
+    const decision = decideMenuReply({ lastStep: "awaiting_1_type", text, night: false });
+
+    assert.equal(decision.nextStep, "awaiting_1_urgency", text);
+  }
+
+  for (const text of ["não sei", "olá", "depende"]) {
+    const decision = decideMenuReply({ lastStep: "awaiting_1_type", text, night: false });
+
+    assert.equal(decision.nextStep, "awaiting_1_type", text);
+    assert.equal(decision.unclearCount, 1, text);
+  }
+});
+
+test("apoio domiciliário: 'para quando' entende o texto", () => {
+  for (const text of ["o quanto antes", "é urgente", "para hoje", "daqui a duas semanas", "no próximo mês", "só quero informação", "estou só a ver preços"]) {
+    const decision = decideMenuReply({ lastStep: "awaiting_1_urgency", text, night: false });
+
+    assert.equal(decision.nextStep, "awaiting_1_zone", text);
+  }
+
+  const unclear = decideMenuReply({ lastStep: "awaiting_1_urgency", text: "talvez", night: false });
+
+  assert.equal(unclear.nextStep, "awaiting_1_urgency");
+  assert.equal(unclear.unclearCount, 1);
+});
+
+test("formação: saudação diante da lista de cursos pede de novo; três seguidas passam para a equipa", () => {
+  const first = decideMenuReply({ lastStep: "awaiting_2", text: "Boa tarde", night: false });
+
+  assert.equal(first.nextStep, "awaiting_2");
+  assert.equal(first.unclearCount, 1);
+  assert.match(first.list.text, /Toque no botão “Ver cursos”/);
+  assert.match(first.list.text, /Técnico de Geriatria/);
+
+  const third = decideMenuReply({ lastStep: "awaiting_2", text: "obrigada", unclearCount: 2, night: false });
+
+  assert.equal(third.handoff, true);
+  assert.equal(third.gaveUp, true);
+});
+
+test("cada pergunta do bot explica como responder e conta as tentativas por pergunta", () => {
+  const steps = [
+    ["menu", "quero saber preços", "Ver opções"],
+    ["awaiting_1", "não sei", "Ver opções"],
+    ["awaiting_1_type", "não sei", "Ver apoios"],
+    ["awaiting_1_urgency", "talvez", "Ver opções"],
+    ["awaiting_3_age", "Mais", "Responder"],
+    ["awaiting_3_avail", "não sei", "Escolher"]
+  ];
+
+  for (const [lastStep, text, button] of steps) {
+    const first = decideMenuReply({ lastStep, text, night: false });
+    const second = decideMenuReply({ lastStep, text, unclearCount: first.unclearCount, night: false });
+    const third = decideMenuReply({ lastStep, text, unclearCount: second.unclearCount, night: false });
+
+    assert.equal(first.unclearCount, 1, lastStep);
+    assert.equal(second.unclearCount, 2, lastStep);
+    assert.equal(third.handoff, true, lastStep);
+    assert.equal(third.gaveUp, true, lastStep);
+    assert.match(first.list.text, new RegExp(`Toque no botão “${button}” aqui em baixo`), lastStep);
+    assert.equal(first.nextStep, lastStep, lastStep);
+  }
+});
+
+test("tocar na lista continua a valer mais que qualquer texto em todas as perguntas", () => {
+  assert.equal(decideMenuReply({ lastStep: "awaiting_1", text: "não sei", choiceId: "w2", night: false }).nextStep, "awaiting_1_type");
+  assert.equal(decideMenuReply({ lastStep: "awaiting_1_type", text: "?", choiceId: "h4", night: false }).nextStep, "awaiting_1_urgency");
+  assert.equal(decideMenuReply({ lastStep: "awaiting_1_urgency", text: "?", choiceId: "u2", night: false }).nextStep, "awaiting_1_zone");
+  assert.equal(
+    decideMenuReply({ lastStep: "awaiting_2", text: "?", choiceId: "c3", night: false }).replies[0],
+    "Obrigada pelo interesse em Gestão de ERPI, CD e SAD!"
+  );
 });

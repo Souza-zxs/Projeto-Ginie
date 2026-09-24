@@ -11,7 +11,7 @@ import {
 import { getKnownLeadFacts, upsertLeadFromQualification } from "@/services/leads/workflow";
 import { isNightTime } from "@/lib/service-hours";
 import { shouldResumeBot } from "@/services/uazapi/bot-resume";
-import { DEFAULT_RECRUITMENT_FORM_URL, decideMenuReply, readMenuStep } from "@/services/uazapi/menu-bot";
+import { DEFAULT_RECRUITMENT_FORM_URL, decideMenuReply, readMenuStep, withTapHint } from "@/services/uazapi/menu-bot";
 import { sendUazapiList, sendUazapiMessage } from "@/services/uazapi/send-message";
 
 type AgentConfig = {
@@ -346,6 +346,7 @@ async function runMenuBot({
     isMedia,
     mediaRetry: !restart && lastOutbound?.payload?.media_retry === true,
     night: isNightTime(),
+    unclearCount: restart || forceMenuStep ? 0 : Number(lastOutbound?.payload?.unclear_count) || 0,
     candidacyFails: restart ? [] : (Array.isArray(lastOutbound?.payload?.candidacy_fails) ? (lastOutbound?.payload?.candidacy_fails as string[]) : []),
     recruitmentFormUrl: process.env.RECRUITMENT_FORM_URL || DEFAULT_RECRUITMENT_FORM_URL
   });
@@ -378,7 +379,7 @@ async function runMenuBot({
         // Lista clicável; se a Uazapi recusar (ou o aparelho não a suportar no envio), cai no
         // menu numerado em texto, que a pessoa responde digitando.
         try {
-          result = await sendUazapiList({ phone, ...decision.list, integrationConfig });
+          result = await sendUazapiList({ phone, ...withTapHint(decision.list), integrationConfig });
           sentAs = "list";
         } catch {
           result = null;
@@ -404,6 +405,7 @@ async function runMenuBot({
           media_retry: decision.mediaRetry === true,
           ...(decision.candidacyFails ? { candidacy_fails: decision.candidacyFails } : {}),
           ...(decision.gaveUp ? { gave_up: true } : {}),
+          ...(decision.unclearCount ? { unclear_count: decision.unclearCount } : {}),
           result
         }
       });

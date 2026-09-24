@@ -48,6 +48,8 @@ export type MenuDecision = {
   candidacyFails?: CandidacyKey[];
   /** Saudação ou conversa de cortesia ("Boa tarde", "Tudo bem"): não conta como resposta errada. */
   smallTalk?: boolean;
+  /** Quantas vezes seguidas a resposta a uma pergunta de lista não foi entendida (1 ou 2); na terceira o bot desiste. */
+  unclearCount?: number;
   /** O bot desistiu por não entender (não foi a pessoa que pediu a equipa): um toque no menu retoma o fluxo. */
   gaveUp?: boolean;
 };
@@ -238,7 +240,6 @@ const AGE_INDEX = 1;
 const CANDIDACY_INTRO = "Obrigada pelo interesse em trabalhar na DAR+!";
 const PASSED_INTRO =
   "Obrigada! Passou à próxima etapa. Faltam só algumas perguntas rápidas para conhecermos melhor o seu perfil.";
-const UNCLEAR_PREFIX = "Desculpe, não consegui perceber a sua resposta.";
 
 function formatHint(item: CandidacyItem) {
   return item.format ? `Responda neste formato: ${item.format.pattern}. Exemplo: ${item.format.example}.` : "";
@@ -319,8 +320,28 @@ function yesNoAnswer(choiceId: string | null | undefined, text: string): "yes" |
 
   const word = normalizeWord(text);
 
-  if (/^(nao|n|no)(\s|,|$)/.test(word)) return "no";
-  if (/^(sim|s|claro|tenho|posso|vivo|consigo|yes|ok)(\s|,|$)/.test(word)) return "yes";
+  if (/^(nao|n|no|nunca|negativo|ainda nao)(\s|,|$)/.test(word)) return "no";
+  if (/^(sim|s|claro|tenho|posso|vivo|consigo|yes|ok|com certeza|certo|positivo|afirmativo|pode)(\s|,|$)/.test(word)) return "yes";
+
+  return null;
+}
+
+/**
+ * Resposta natural à pergunta "Tem 18 anos ou mais?": "24anos", "tenho 25", "mais de 18",
+ * "sou maior de idade", "nasci em 1990" (sim) ou "17", "menos de 18", "sou menor" (não).
+ */
+function ageAnswer(text: string, currentYear: number): "yes" | "no" | null {
+  const word = normalizeWord(text);
+
+  if (/(menos de 18|menor de idade|sou menor|ainda sou menor)/.test(word)) return "no";
+  if (/(mais de 18|maior de idade|sou maior|maior de 18|acima de 18)/.test(word)) return "yes";
+
+  const number = Number(word.match(/\d{1,4}/)?.[0]);
+
+  if (!Number.isFinite(number)) return null;
+  if (number >= 1900 && number <= currentYear) return currentYear - number >= 18 ? "yes" : "no";
+  if (number >= 18 && number <= 120) return "yes";
+  if (number >= 1 && number <= 17) return "no";
 
   return null;
 }
@@ -383,7 +404,8 @@ function decideCandidacy({
   text,
   choiceId,
   other,
-  mediaRetry,
+  unclearCount,
+  currentYear,
   fails,
   night,
   recruitmentFormUrl
@@ -393,7 +415,8 @@ function decideCandidacy({
   text: string;
   choiceId?: string | null;
   other: boolean;
-  mediaRetry: boolean;
+  unclearCount: number;
+  currentYear: number;
   fails: CandidacyKey[];
   night: boolean;
   recruitmentFormUrl?: string | null;
@@ -416,23 +439,30 @@ function decideCandidacy({
     return closing({ night, choice: null });
   }
 
-  const answer = item.kind === "avail" ? availAnswer(choiceId, text) : yesNoAnswer(choiceId, text);
+  const answer =
+    item.kind === "avail"
+      ? availAnswer(choiceId, text)
+      : item.key === "age" && !choiceId
+        ? (ageAnswer(text, currentYear) ?? yesNoAnswer(choiceId, text))
+        : yesNoAnswer(choiceId, text);
 
   if (!answer) {
-    if (mediaRetry) {
-      return closing({ night, choice: null, gaveUp: true });
-    }
-
+    // Três respostas seguidas sem entender: a equipa assume. Antes disso, explica como responder.
     const prompt = candidacyPrompt(index);
+    const button = prompt.list?.listButton ?? "";
+    const how =
+      item.kind === "avail"
+        ? `Toque no botão “${button}” aqui em baixo e escolha uma opção, ou escreva "semana", "fim de semana" ou "semana e fim de semana".`
+        : `Toque no botão “${button}” aqui em baixo e escolha Sim ou Não, ou escreva só "sim" ou "não".`;
 
-    return {
-      replies: [`${UNCLEAR_PREFIX} ${prompt.text}`],
-      nextStep: item.step,
-      handoff: false,
-      mediaRetry: true,
-      candidacyFails: fails,
-      ...(prompt.list ? { list: { ...prompt.list, text: `${UNCLEAR_PREFIX}\n${prompt.list.text}` } } : {})
-    };
+    return unclearOrGiveUp({
+      step: item.step,
+      question: { text: item.question, list: prompt.list && { ...prompt.list, text: prompt.list.text } },
+      how,
+      unclearCount,
+      night,
+      fails
+    });
   }
 
   if (answer === "no" && item.key) {
@@ -540,6 +570,150 @@ function startOption(intent: MenuIntent): MenuDecision {
     nextStep: `awaiting_${intent}` as MenuStep,
     handoff: false,
     list: { ...list, text: `${ack}\n${list.text}` }
+  };
+}
+
+function tokensOf(text: string) {
+  return (
+    text
+      .normalize("NFKD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .toLowerCase()
+      .match(/\p{L}+/gu) ?? []
+  );
+}
+
+/** Para quem é o apoio: id da lista (w1..w4) ou texto ("para a minha mãe"). Mais de um caso: null. */
+function whoAnswer(choiceId: string | null | undefined, text: string): "w1" | "w2" | "w3" | "w4" | null {
+  if (choiceId === "w1" || choiceId === "w2" || choiceId === "w3" || choiceId === "w4") return choiceId;
+
+  const tokens = tokensOf(text);
+  const has = (words: string[]) => tokens.some((token) => words.includes(token));
+  const found = (
+    [
+      ["w1", ["mim", "eu", "propria", "proprio"]],
+      ["w2", ["mae", "mamae", "mama", "pai", "pais", "papa", "progenitor", "progenitores"]],
+      [
+        "w3",
+        ["avo", "avos", "avozinha", "avozinho", "tio", "tia", "marido", "esposa", "esposo", "mulher", "irmao", "irma", "sogro", "sogra", "conjuge", "familiar", "familiares", "filho", "filha", "parente", "primo", "prima"]
+      ],
+      ["w4", ["amigo", "amiga", "conhecido", "conhecida", "vizinho", "vizinha", "colega"]]
+    ] as Array<[string, string[]]>
+  ).filter(([, words]) => has(words));
+
+  return found.length === 1 ? (found[0][0] as "w1" | "w2" | "w3" | "w4") : null;
+}
+
+const HELP_KEYWORDS: Array<[string, string[]]> = [
+  ["h1", ["higiene", "banho", "banhar", "vestir", "fralda", "fraldas", "higienizar"]],
+  ["h2", ["refeicao", "refeicoes", "comida", "cozinhar", "alimentacao", "almoco", "jantar", "comer"]],
+  ["h3", ["companhia", "acompanhar", "acompanhamento", "conversar", "passear", "passeio"]],
+  ["h4", ["medicacao", "medicamento", "medicamentos", "remedio", "remedios", "comprimidos", "medicar"]],
+  ["h5", ["domestico", "domestica", "limpeza", "limpar", "casa", "lavar", "roupa", "arrumar"]],
+  ["h6", ["varios", "varias", "tudo", "completo", "completa"]]
+];
+
+/** Tipo de apoio: id da lista (h1..h6) ou texto. Mais de um tipo mencionado = "vários serviços". */
+function helpAnswer(choiceId: string | null | undefined, text: string): string | null {
+  if (choiceId && /^h[1-6]$/.test(choiceId)) return choiceId;
+
+  const tokens = tokensOf(text);
+  const found = HELP_KEYWORDS.filter(([, words]) => tokens.some((token) => words.includes(token))).map(([id]) => id);
+
+  if (!found.length) return null;
+
+  return found.length === 1 ? found[0] : "h6";
+}
+
+/** Para quando: id da lista (u1..u3) ou texto ("o quanto antes", "daqui a duas semanas", "só informação"). */
+function urgencyAnswer(choiceId: string | null | undefined, text: string): string | null {
+  if (choiceId && /^u[1-3]$/.test(choiceId)) return choiceId;
+
+  const word = normalizeWord(text);
+
+  if (/(quanto antes|urgen|imediat|\bja\b|hoje|amanha|agora|rapid)/.test(word)) return "u1";
+  if (/(informar|informacao|informacoes|avaliar|curiosidade|so ver|apenas ver|orcamento|preco|duvida)/.test(word)) return "u3";
+  if (/(proxim|semanas|\bmes\b|meses|breve|daqui a)/.test(word)) return "u2";
+
+  return null;
+}
+
+/** Curso: id da lista (c1..c5) ou o nome/tema escrito. */
+function courseAnswer(choiceId: string | null | undefined, text: string): string | null {
+  if (choiceId && /^c[1-5]$/.test(choiceId)) return choiceId;
+
+  const tokens = tokensOf(text);
+  const found = (
+    [
+      ["c1", ["geriatria", "tecnico"]],
+      ["c2", ["animacao", "sociocultural"]],
+      ["c3", ["gestao", "erpi", "sad", "diretor", "diretora", "direcao", "gerir"]],
+      ["c4", ["burnout", "esgotamento"]],
+      ["c5", ["modulo", "modulos", "avulso", "avulsos", "avulsa"]]
+    ] as Array<[string, string[]]>
+  ).filter(([, words]) => tokens.some((token) => words.includes(token)));
+
+  return found.length === 1 ? found[0][0] : null;
+}
+
+function tapHow(list: MenuList, example: string) {
+  return `Toque no botão “${list.listButton}” aqui em baixo e escolha uma opção, ou escreva por exemplo “${example}”.`;
+}
+
+/** Resposta não entendida: explica como responder e repete a pergunta; na terceira vez a equipa assume. */
+function unclearOrGiveUp({
+  step,
+  question,
+  how,
+  unclearCount,
+  night,
+  fails
+}: {
+  step: MenuStep;
+  question: { text: string; list?: MenuList };
+  how: string;
+  unclearCount: number;
+  night: boolean;
+  fails?: CandidacyKey[];
+}): MenuDecision {
+  if (unclearCount >= 2) {
+    return closing({ night, choice: null, gaveUp: true });
+  }
+
+  const prefix = `Desculpe, não consegui perceber. ${how}`;
+
+  return {
+    replies: [`${prefix}\n\n${question.text}`],
+    nextStep: step,
+    handoff: false,
+    unclearCount: unclearCount + 1,
+    ...(fails ? { candidacyFails: fails } : {}),
+    ...(question.list ? { list: { ...question.list, text: `${prefix}\n\n${question.list.text}` } } : {})
+  };
+}
+
+/**
+ * Toda lista diz qual botão tocar, pelo nome que aparece no WhatsApp ("Responder", "Ver opções").
+ * Sem isso, quem não conhece a lista responde escrevendo e o bot não entende.
+ */
+export function withTapHint(list: MenuList): MenuList {
+  const named = `“${list.listButton}”`;
+
+  if (list.text.includes(named)) {
+    return list;
+  }
+
+  if (/toque no botão/i.test(list.text)) {
+    return { ...list, text: list.text.replace(/(toque no botão)/i, (match) => `${match} ${named}`) };
+  }
+
+  const hint = `👇 Toque no botão ${named} aqui em baixo para escolher.`;
+  const backIndex = list.text.indexOf("\nSe se enganou");
+
+  // A ação principal vem antes do aviso de "voltar".
+  return {
+    ...list,
+    text: backIndex >= 0 ? `${list.text.slice(0, backIndex)}\n${hint}${list.text.slice(backIndex)}` : `${list.text}\n${hint}`
   };
 }
 
@@ -681,6 +855,10 @@ type DecideInput = {
   recruitmentFormUrl?: string | null;
   /** Eliminatórias respondidas "Não" até agora (vem do payload da última mensagem do bot). */
   candidacyFails?: string[];
+  /** Respostas seguidas não entendidas na pergunta atual (vem do payload da última mensagem do bot). */
+  unclearCount?: number;
+  /** Ano corrente, para ler "nasci em 1990" como idade; padrão: o do relógio. */
+  currentYear?: number;
 };
 
 function closing({
@@ -795,6 +973,8 @@ export function decideMenuReply({
   isMedia = false,
   mediaRetry = false,
   candidacyFails,
+  unclearCount = 0,
+  currentYear = new Date().getFullYear(),
   night,
   recruitmentFormUrl
 }: DecideInput): MenuDecision {
@@ -865,11 +1045,16 @@ export function decideMenuReply({
       };
     }
 
-    if (lastStep === "menu") {
-      return { replies: [`${MENU_RETRY_PREFIX}\n\n${MENU_WELCOME}`], nextStep: "menu_retry", handoff: false, list: menuList(MENU_RETRY_PREFIX) };
-    }
+    // Estado antigo "menu_retry" (conversas de antes) conta como uma tentativa já gasta.
+    const question = repeatQuestion("menu") as { text: string; list: MenuList };
 
-    return closing({ night, choice: null, gaveUp: true });
+    return unclearOrGiveUp({
+      step: "menu",
+      question,
+      how: tapHow(question.list, "quero saber os cursos"),
+      unclearCount: Math.max(unclearCount, lastStep === "menu_retry" ? 1 : 0),
+      night
+    });
   }
 
   if (isBack(choiceId, text)) {
@@ -890,7 +1075,8 @@ export function decideMenuReply({
       text,
       choiceId,
       other,
-      mediaRetry,
+      unclearCount,
+      currentYear,
       fails,
       night,
       recruitmentFormUrl
@@ -899,11 +1085,23 @@ export function decideMenuReply({
 
   switch (lastStep) {
     case "awaiting_1":
-      return other ? closing({ night, choice: null }) : { replies: [HELP_TEXT], nextStep: "awaiting_1_type", handoff: false, list: HELP_LIST };
+      if (other) return closing({ night, choice: null });
+
+      return whoAnswer(choiceId, text)
+        ? { replies: [HELP_TEXT], nextStep: "awaiting_1_type", handoff: false, list: HELP_LIST }
+        : unclearOrGiveUp({ step: "awaiting_1", question: { text: OPTION_REPLIES[1], list: WHO_LIST }, how: tapHow(WHO_LIST, "para a minha mãe"), unclearCount, night });
     case "awaiting_1_type":
-      return other ? closing({ night, choice: null }) : { replies: [URGENCY_TEXT], nextStep: "awaiting_1_urgency", handoff: false, list: URGENCY_LIST };
+      if (other) return closing({ night, choice: null });
+
+      return helpAnswer(choiceId, text)
+        ? { replies: [URGENCY_TEXT], nextStep: "awaiting_1_urgency", handoff: false, list: URGENCY_LIST }
+        : unclearOrGiveUp({ step: "awaiting_1_type", question: { text: HELP_TEXT, list: HELP_LIST }, how: tapHow(HELP_LIST, "ajuda com a higiene"), unclearCount, night });
     case "awaiting_1_urgency":
-      return other ? closing({ night, choice: null }) : { replies: [ASK_ZONE], nextStep: "awaiting_1_zone", handoff: false };
+      if (other) return closing({ night, choice: null });
+
+      return urgencyAnswer(choiceId, text)
+        ? { replies: [ASK_ZONE], nextStep: "awaiting_1_zone", handoff: false }
+        : unclearOrGiveUp({ step: "awaiting_1_urgency", question: { text: URGENCY_TEXT, list: URGENCY_LIST }, how: tapHow(URGENCY_LIST, "o quanto antes"), unclearCount, night });
     case "awaiting_1_zone":
       return hasWords(text)
         ? confirmation("awaiting_1_confirm", text)
@@ -923,8 +1121,16 @@ export function decideMenuReply({
       return hasWords(text)
         ? confirmation("awaiting_1_confirm", text)
         : { replies: [ASK_ZONE_AGAIN], nextStep: "awaiting_1_zone", handoff: false };
-    case "awaiting_2":
-      return closing({ night, choice: 2, courseName: other ? null : courseNameFromChoice(choiceId) });
+    case "awaiting_2": {
+      const course = courseAnswer(choiceId, text);
+
+      // Só saudação/cortesia não é curso nem pedido: pergunta de novo. Texto com conteúdo segue para a equipa.
+      if (!other && !course && isSmallTalk(text)) {
+        return unclearOrGiveUp({ step: "awaiting_2", question: { text: OPTION_REPLIES[2], list: COURSE_LIST }, how: tapHow(COURSE_LIST, "Técnico de Geriatria"), unclearCount, night });
+      }
+
+      return closing({ night, choice: 2, courseName: other ? null : courseNameFromChoice(course) });
+    }
     case "declined":
       return normalizeWord(text) === "menu"
         ? { replies: [MENU_WELCOME], nextStep: "menu", handoff: false, list: menuList() }
