@@ -7,6 +7,7 @@ export type MenuHistoryMessage = {
   content: string | null;
   /** payload->>menu_step da mensagem; só o bot preenche. */
   menu_step: string | null;
+  created_at?: string;
 };
 
 export type MenuAnswer = { question: string; answer: string };
@@ -129,9 +130,20 @@ function isBackAnswer(text: string) {
   return letters === "voltar" || letters === "back";
 }
 
-/** Respostas do cliente, em ordem, com a pergunta a que cada uma responde. */
-export function extractMenuAnswers(messages: MenuHistoryMessage[]): MenuAnswer[] {
+// Resposta recusada pelo bot (ele repetiu a mesma pergunta por não entender): não conta.
+const RETRY_STEP_OF: Record<string, string> = {
+  menu: "menu_retry",
+  awaiting_1_zone: "awaiting_1_zone_retry",
+  awaiting_3_details: "awaiting_3_details_retry"
+};
+
+function nextBotStep(messages: MenuHistoryMessage[], position: number) {
+  return messages.slice(position + 1).find((item) => item.direction === "outbound" && item.menu_step)?.menu_step ?? null;
+}
+
+function walkMenu(messages: MenuHistoryMessage[]): { answers: MenuAnswer[]; afterHandoff: number } {
   const answers: MenuAnswer[] = [];
+  let afterHandoff = 0;
   let pendingStep: string | null = null;
 
   for (let position = 0; position < messages.length; position += 1) {
@@ -156,7 +168,7 @@ export function extractMenuAnswers(messages: MenuHistoryMessage[]): MenuAnswer[]
     const confirmStep: ConfirmStep | undefined = pendingStep ? CONFIRM_STEPS[pendingStep] : undefined;
 
     if (confirmStep) {
-      const nextStep = messages.slice(position + 1).find((item) => item.direction === "outbound" && item.menu_step)?.menu_step;
+      const nextStep = nextBotStep(messages, position);
 
       if (nextStep === confirmStep.askAgain) {
         truncateFrom(answers, confirmStep.question);
@@ -173,20 +185,24 @@ export function extractMenuAnswers(messages: MenuHistoryMessage[]): MenuAnswer[]
     const question = pendingStep ? QUESTION_BY_STEP[pendingStep] : null;
 
     if (question && text && pendingStep && DISCARDED_BY_BACK[pendingStep] && isBackAnswer(text)) {
-      const discarded = DISCARDED_BY_BACK[pendingStep];
-      const index = answers.map((item) => item.question).lastIndexOf(discarded);
-
-      if (index >= 0) {
-        answers.length = index;
-      }
+      truncateFrom(answers, DISCARDED_BY_BACK[pendingStep]);
     } else if (question && text) {
-      answers.push({ question, answer: displayAnswer(question, text) });
+      const retry = pendingStep ? RETRY_STEP_OF[pendingStep] : undefined;
+
+      if (!retry || nextBotStep(messages, position) !== retry) {
+        answers.push({ question, answer: displayAnswer(question, text) });
+      }
     } else if (pendingStep === "done" && text) {
-      answers.push({ question: "Depois do encaminhamento", answer: text });
+      afterHandoff += 1;
     }
   }
 
-  return answers;
+  return { answers, afterHandoff };
+}
+
+/** Respostas do cliente, em ordem, com a pergunta a que cada uma responde. */
+export function extractMenuAnswers(messages: MenuHistoryMessage[]): MenuAnswer[] {
+  return walkMenu(messages).answers;
 }
 
 /** Assunto escolhido: pelo caminho do menu; ao voltar ao menu principal, recomeça. */
@@ -237,4 +253,53 @@ export function describeClientStatus(progress: MenuProgress, botActive: boolean)
   }
 
   return { label: "A responder ao bot", tone: "default" };
+}
+
+export type MenuRequest = {
+  /** Data da primeira mensagem do pedido. */
+  startedAt: string | null;
+  topic: MenuTopic | null;
+  progress: MenuProgress;
+  answers: MenuAnswer[];
+  /** Mensagens que a pessoa mandou depois de encaminhada (ex.: "Olá", "Obrigada"). */
+  afterHandoff: number;
+};
+
+/**
+ * Uma pessoa pode passar pelo menu várias vezes (voltou depois de 24h, a equipa reativou o
+ * bot...). Cada passagem é um pedido: um novo começa quando o menu reaparece depois de um
+ * encaminhamento. Voltar ao menu no meio do fluxo não abre pedido novo.
+ */
+export function splitMenuRequests(messages: MenuHistoryMessage[]): MenuRequest[] {
+  const segments: MenuHistoryMessage[][] = [[]];
+  let lastBotStep: string | null = null;
+
+  for (const message of messages) {
+    if (message.direction === "outbound" && message.menu_step === "menu" && lastBotStep === "done") {
+      const current = segments[segments.length - 1];
+      let cut = current.length;
+
+      // A mensagem da pessoa que reabriu o menu pertence ao pedido novo, não ao antigo.
+      while (cut > 0 && current[cut - 1].direction === "inbound") {
+        cut -= 1;
+      }
+
+      segments.push(current.splice(cut));
+    }
+
+    segments[segments.length - 1].push(message);
+
+    if (message.direction === "outbound" && message.menu_step) {
+      lastBotStep = message.menu_step;
+    }
+  }
+
+  return segments
+    .filter((segment) => segment.length)
+    .map((segment) => ({
+      startedAt: segment.find((message) => message.created_at)?.created_at ?? null,
+      topic: detectMenuTopic(segment),
+      progress: detectMenuProgress(segment),
+      ...walkMenu(segment)
+    }));
 }

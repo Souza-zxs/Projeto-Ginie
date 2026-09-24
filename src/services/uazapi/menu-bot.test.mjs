@@ -369,3 +369,14 @@ test("mídia como primeira mensagem abre o menu normalmente; texto depois do ped
   assert.equal(answered.nextStep, "awaiting_1_urgency");
   assert.equal(answered.handoff, false);
 });
+
+test("a pergunta do nome e zona pede o formato (nome completo, zona), com exemplo", () => {
+  const first = decideMenuReply({ lastStep: "awaiting_3", text: "Tenho experiência", choiceId: "e1", night: false });
+  const again = decideMenuReply({ lastStep: "awaiting_3_details", text: "😀", night: false });
+  const afterFix = decideMenuReply({ lastStep: "awaiting_3_confirm", text: "Corrigir", choiceId: "fix", night: false });
+
+  for (const decision of [first, again, afterFix]) {
+    assert.match(decision.replies[0], /\(nome completo, zona\)/);
+    assert.match(decision.replies[0], /Ana Silva, Porto/);
+  }
+});

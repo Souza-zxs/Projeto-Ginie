@@ -19,9 +19,7 @@ import { createClient } from "@/lib/supabase/server";
 import {
   TOPIC_LABELS,
   describeClientStatus,
-  detectMenuProgress,
-  detectMenuTopic,
-  extractMenuAnswers
+  splitMenuRequests
 } from "@/services/uazapi/menu-answers";
 import { computeAwaitingSince, formatWaiting } from "@/services/uazapi/awaiting-team";
 import { loadConversationHistory } from "@/services/uazapi/history";
@@ -466,9 +464,11 @@ function ClientPanel({
   conversation: ConversationRow;
   messages: MessageRow[];
 }) {
-  const answers = extractMenuAnswers(messages);
-  const topic = detectMenuTopic(messages);
-  const progress = detectMenuProgress(messages);
+  const requests = splitMenuRequests(messages);
+  const latest = requests[requests.length - 1] ?? null;
+  const answers = latest?.answers ?? [];
+  const topic = latest?.topic ?? null;
+  const progress = latest?.progress ?? "no_menu";
   const name = conversation.contacts?.name || "Sem nome";
 
   return (
@@ -497,7 +497,7 @@ function ClientPanel({
           </div>
         </PanelSection>
 
-        <PanelSection title="Respostas do menu">
+        <PanelSection title={requests.length > 1 ? `Respostas do menu (pedido mais recente)` : "Respostas do menu"}>
           {answers.length ? (
             answers.map((item, index) => (
               <div key={`${item.question}-${index}`} className="rounded-md border bg-white px-3 py-2">

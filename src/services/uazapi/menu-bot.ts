@@ -142,8 +142,9 @@ const EXPERIENCE_LIST: MenuList = {
 
 const ASK_ZONE = "Por fim, em que localidade reside a pessoa a apoiar? Para corrigir a resposta anterior, escreva 'voltar'.";
 const ASK_ZONE_AGAIN = "Não consegui perceber a localidade. Pode escrever o nome da localidade (por exemplo, a cidade ou a freguesia)?";
-const ASK_CANDIDATE_DETAILS = "Pode indicar-nos o seu nome e a zona onde reside? Para corrigir a resposta anterior, escreva 'voltar'.";
-const ASK_CANDIDATE_DETAILS_AGAIN = "Não consegui perceber. Pode escrever o seu nome e a zona onde reside?";
+const ASK_CANDIDATE_DETAILS =
+  "Por favor, indique o seu nome e a zona onde reside, neste formato: (nome completo, zona). Exemplo: (Ana Silva, Porto). Para corrigir a resposta anterior, escreva 'voltar'.";
+const ASK_CANDIDATE_DETAILS_AGAIN = "Não consegui perceber. Escreva neste formato: (nome completo, zona). Exemplo: (Ana Silva, Porto).";
 
 /** Resposta de texto livre válida: pelo menos duas letras seguidas (emoji, números ou pontuação não servem). */
 function hasWords(text: string) {

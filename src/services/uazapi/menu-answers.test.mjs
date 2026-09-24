@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { MENU_CHOICE_ROWS } from "./menu-bot.ts";
-import { describeClientStatus, detectMenuProgress, detectMenuTopic, displayAnswer, extractMenuAnswers } from "./menu-answers.ts";
+import { describeClientStatus, detectMenuProgress, detectMenuTopic, displayAnswer, extractMenuAnswers, splitMenuRequests } from "./menu-answers.ts";
 
 const bot = (step, content = "pergunta") => ({ direction: "outbound", content, menu_step: step });
 const client = (content) => ({ direction: "inbound", content, menu_step: null });
@@ -24,13 +24,12 @@ const supportFlow = [
   bot("done")
 ];
 
-test("associa cada resposta à pergunta feita antes dela", () => {
+test("associa cada resposta à pergunta feita antes dela (resposta que o bot recusou não conta)", () => {
   assert.deepEqual(extractMenuAnswers(supportFlow), [
     { question: "Opção do menu", answer: "Apoio domiciliário" },
     { question: "Apoio para quem", answer: "Pai ou mãe" },
     { question: "Tipo de apoio", answer: "Higiene pessoal" },
     { question: "Urgência", answer: "O quanto antes" },
-    { question: "Localidade", answer: "👍" },
     { question: "Localidade", answer: "Lisboa" }
   ]);
 });
@@ -45,11 +44,12 @@ test("mensagem manual da equipa não altera a pergunta pendente", () => {
   assert.deepEqual(extractMenuAnswers(messages), [{ question: "Localidade", answer: "Porto" }]);
 });
 
-test("mensagens depois do encaminhamento ficam à parte", () => {
-  const messages = [...supportFlow, client("Ainda aí?")];
-  const answers = extractMenuAnswers(messages);
+test("mensagens depois do encaminhamento não entram nas respostas, só numa contagem", () => {
+  const messages = [...supportFlow, client("Ainda aí?"), client("Olá")];
+  const [request] = splitMenuRequests(messages);
 
-  assert.deepEqual(answers.at(-1), { question: "Depois do encaminhamento", answer: "Ainda aí?" });
+  assert.equal(extractMenuAnswers(messages).at(-1).question, "Localidade");
+  assert.equal(request.afterHandoff, 2);
 });
 
 test("identifica o assunto pelo caminho do menu", () => {
@@ -222,7 +222,7 @@ test("mensagem manual da equipa (sem menu_step) no meio do fluxo não vira respo
   assert.deepEqual(extractMenuAnswers(messages), [{ question: "Localidade", answer: "Lisboa" }]);
 });
 
-test("mídia que o bot não lê ([áudio], [imagem]) não vira resposta, mas aparece depois do encaminhamento", () => {
+test("mídia que o bot não lê ([áudio], [imagem]) não vira resposta; depois do encaminhamento só conta", () => {
   const messages = [
     bot("awaiting_1_zone"), client("[áudio]"),
     bot("awaiting_1_zone", "só texto"), client("Lisboa"),
@@ -231,8 +231,73 @@ test("mídia que o bot não lê ([áudio], [imagem]) não vira resposta, mas apa
     bot("done"), client("[áudio]")
   ];
 
-  assert.deepEqual(extractMenuAnswers(messages), [
-    { question: "Localidade", answer: "Lisboa" },
-    { question: "Depois do encaminhamento", answer: "[áudio]" }
+  assert.deepEqual(extractMenuAnswers(messages), [{ question: "Localidade", answer: "Lisboa" }]);
+  assert.equal(splitMenuRequests(messages)[0].afterHandoff, 1);
+});
+
+
+const at = (n) => `2026-09-24T${String(8 + n).padStart(2, "0")}:00:00Z`;
+const stamped = (messages) => messages.map((message, index) => ({ ...message, created_at: at(index) }));
+
+test("cada passagem pelo menu é um pedido; o menu reaparecendo depois do encaminhamento abre outro", () => {
+  const messages = stamped([
+    client("olá"), bot("menu"),
+    client("Formação"), bot("awaiting_2"),
+    client("Técnico de Geriatria"), bot("done"),
+    client("Olá"), bot("menu"),
+    client("Apoio domiciliário"), bot("awaiting_1"),
+    client("Para mim"), bot("awaiting_1_type")
   ]);
+  const requests = splitMenuRequests(messages);
+
+  assert.equal(requests.length, 2);
+  assert.equal(requests[0].topic, "training");
+  assert.equal(requests[0].progress, "handed_off");
+  assert.deepEqual(requests[0].answers, [
+    { question: "Opção do menu", answer: "Formação" },
+    { question: "Curso", answer: "Técnico de Geriatria" }
+  ]);
+  assert.equal(requests[0].startedAt, at(0));
+
+  assert.equal(requests[1].topic, "support");
+  assert.equal(requests[1].progress, "in_progress");
+  assert.deepEqual(requests[1].answers, [
+    { question: "Opção do menu", answer: "Apoio domiciliário" },
+    { question: "Apoio para quem", answer: "Para mim" }
+  ]);
+  // O "Olá" que reabriu o menu pertence ao pedido novo, não ao encaminhamento antigo.
+  assert.equal(requests[0].afterHandoff, 0);
+  assert.equal(requests[1].startedAt, at(6));
+});
+
+test("voltar ao menu no meio do fluxo não abre pedido novo", () => {
+  const messages = stamped([
+    bot("menu"), client("Formação"), bot("awaiting_2"),
+    client("← Voltar"), bot("menu"),
+    client("Candidatura"), bot("awaiting_3")
+  ]);
+
+  assert.equal(splitMenuRequests(messages).length, 1);
+});
+
+test("várias passagens de teste: três pedidos, cada um com as suas respostas", () => {
+  const run = (choice, step) => [client("olá"), bot("menu"), client(choice), bot(step), client("x"), bot("done")];
+  const messages = stamped([...run("Formação", "awaiting_2"), ...run("Candidatura", "awaiting_3"), ...run("Formação", "awaiting_2")]);
+  const requests = splitMenuRequests(messages);
+
+  assert.equal(requests.length, 3);
+  assert.deepEqual(requests.map((request) => request.topic), ["training", "recruitment", "training"]);
+});
+
+test("conversa sem menu não gera pedido com progresso", () => {
+  const requests = splitMenuRequests([client("oi"), { direction: "outbound", content: "x", menu_step: null }]);
+
+  assert.equal(requests.length, 1);
+  assert.equal(requests[0].progress, "no_menu");
+});
+
+test("opção do menu recusada (o bot repetiu o menu) não conta como resposta", () => {
+  const messages = [bot("menu"), client("#"), bot("menu_retry"), client("2"), bot("awaiting_2")];
+
+  assert.deepEqual(extractMenuAnswers(messages), [{ question: "Opção do menu", answer: "Formação" }]);
 });

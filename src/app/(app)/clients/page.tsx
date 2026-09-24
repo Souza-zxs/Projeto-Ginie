@@ -8,18 +8,18 @@ import { PageHeader } from "@/components/page-header";
 import { getCurrentProfile } from "@/lib/auth/organization";
 import { formatDateTime, nowMs } from "@/lib/datetime";
 import { formatPhoneForDisplay } from "@/lib/phone";
-import { computeAwaitingSince, formatWaiting } from "@/services/uazapi/awaiting-team";
-import { loadConversationHistory } from "@/services/uazapi/history";
 import { createClient } from "@/lib/supabase/server";
 import { cn } from "@/lib/utils";
+import { computeAwaitingSince, formatWaiting } from "@/services/uazapi/awaiting-team";
+import { loadConversationHistory } from "@/services/uazapi/history";
 import {
   TOPIC_LABELS,
-  detectMenuProgress,
   describeClientStatus,
-  detectMenuTopic,
-  extractMenuAnswers,
+  splitMenuRequests,
+  type MenuRequest,
   type MenuTopic
 } from "@/services/uazapi/menu-answers";
+import { DeleteClientButton } from "./delete-client-button";
 
 type ClientConversation = {
   id: string;
@@ -52,6 +52,8 @@ export default async function ClientsPage({ searchParams }: { searchParams: Prom
     );
   }
 
+  const canManage = profile.role === "admin" || profile.role === "manager";
+
   const { data: conversations } = await supabase
     .from("conversations")
     .select("id, ai_enabled, last_message_at, contacts(name, phone)")
@@ -71,17 +73,18 @@ export default async function ClientsPage({ searchParams }: { searchParams: Prom
   const clients = (conversations ?? [])
     .map((conversation) => {
       const history = messagesByConversation.get(conversation.id) ?? [];
+      const requests = splitMenuRequests(history);
+      const latest = requests[requests.length - 1] ?? null;
 
       return {
         conversation,
-        answers: extractMenuAnswers(history),
-        topic: detectMenuTopic(history),
-        progress: detectMenuProgress(history),
+        latest,
+        previous: requests.slice(0, -1).reverse(),
         awaitingSince: computeAwaitingSince(history, !conversation.ai_enabled)
       };
     })
-    .filter((client) => client.progress !== "no_menu")
-    .filter((client) => !topicFilter || client.topic === topicFilter)
+    .filter((client) => client.latest && client.latest.progress !== "no_menu")
+    .filter((client) => !topicFilter || client.latest?.topic === topicFilter)
     .filter((client) => {
       if (!searchQuery) {
         return true;
@@ -96,7 +99,7 @@ export default async function ClientsPage({ searchParams }: { searchParams: Prom
     <>
       <PageHeader
         title="Clientes"
-        description="Pessoas que passaram pelo menu do WhatsApp, com o número, o nome e todas as respostas que deram. A página atualiza sozinha."
+        description="Pessoas que passaram pelo menu do WhatsApp, com o número, o nome e as respostas de cada pedido. A página atualiza sozinha."
       />
       <AutoRefresh intervalMs={15_000} />
 
@@ -127,61 +130,71 @@ export default async function ClientsPage({ searchParams }: { searchParams: Prom
       </div>
 
       {clients.length ? (
-        <div className="grid gap-4 lg:grid-cols-2">
-          {clients.map(({ conversation, answers, topic, progress, awaitingSince }) => (
-            <article key={conversation.id} className="rounded-lg border bg-card p-5 shadow-sm">
-              <header className="flex items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <h2 className="truncate text-base font-semibold text-slate-950">
-                    {conversation.contacts?.name || "Sem nome"}
-                  </h2>
-                  <p className="mt-1 flex items-center gap-2 text-sm text-muted-foreground">
-                    <Phone className="h-3.5 w-3.5" />
-                    {conversation.contacts?.phone ? formatPhoneForDisplay(conversation.contacts.phone) : "Sem número"}
-                  </p>
-                </div>
-                <div className="flex flex-wrap justify-end gap-2">
-                  {topic ? <Badge tone="muted">{TOPIC_LABELS[topic]}</Badge> : null}
-                  <Badge tone={describeClientStatus(progress, conversation.ai_enabled).tone}>
-                    {describeClientStatus(progress, conversation.ai_enabled).label}
-                  </Badge>
-                  {awaitingSince ? (
-                    <Badge tone={renderedAt - awaitingSince.getTime() >= 2 * 3_600_000 ? "danger" : "warning"}>
-                      Sem resposta há {formatWaiting(renderedAt - awaitingSince.getTime())}
-                    </Badge>
-                  ) : null}
-                </div>
-              </header>
+        <div className="grid items-start gap-4 lg:grid-cols-2">
+          {clients.map(({ conversation, latest, previous, awaitingSince }) => {
+            const status = describeClientStatus(latest?.progress ?? "no_menu", conversation.ai_enabled);
+            const waitingMs = awaitingSince ? renderedAt - awaitingSince.getTime() : null;
 
-              {answers.length ? (
-                <dl className="mt-4 divide-y rounded-md border bg-white">
-                  {answers.map((item, index) => (
-                    <div key={`${item.question}-${index}`} className="flex items-start justify-between gap-4 px-3 py-2">
-                      <dt className="shrink-0 text-xs text-muted-foreground">{item.question}</dt>
-                      <dd className="whitespace-pre-wrap break-words text-right text-sm font-medium text-slate-900">
-                        {item.answer}
-                      </dd>
+            return (
+              <article key={conversation.id} className="rounded-lg border bg-card p-5 shadow-sm">
+                <header className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <h2 className="truncate text-base font-semibold text-slate-950">
+                      {conversation.contacts?.name || "Sem nome"}
+                    </h2>
+                    <p className="mt-1 flex items-center gap-2 text-sm text-muted-foreground">
+                      <Phone className="h-3.5 w-3.5" />
+                      {conversation.contacts?.phone ? formatPhoneForDisplay(conversation.contacts.phone) : "Sem número"}
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap justify-end gap-2">
+                    {latest?.topic ? <Badge tone="muted">{TOPIC_LABELS[latest.topic]}</Badge> : null}
+                    <Badge tone={status.tone}>{status.label}</Badge>
+                    {waitingMs !== null ? (
+                      <Badge tone={waitingMs >= 2 * 3_600_000 ? "danger" : "warning"}>
+                        Sem resposta há {formatWaiting(waitingMs)}
+                      </Badge>
+                    ) : null}
+                  </div>
+                </header>
+
+                {latest ? <RequestAnswers request={latest} className="mt-4" /> : null}
+
+                {previous.length ? (
+                  <details className="mt-3 rounded-md border bg-slate-50 px-3 py-2">
+                    <summary className="cursor-pointer text-xs font-medium text-slate-700">
+                      Pedidos anteriores ({previous.length})
+                    </summary>
+                    <div className="mt-3 space-y-4">
+                      {previous.map((request, index) => (
+                        <div key={`${request.startedAt}-${index}`}>
+                          <div className="mb-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                            <span>{formatDateTime(request.startedAt)}</span>
+                            {request.topic ? <Badge tone="muted">{TOPIC_LABELS[request.topic]}</Badge> : null}
+                          </div>
+                          <RequestAnswers request={request} />
+                        </div>
+                      ))}
                     </div>
-                  ))}
-                </dl>
-              ) : (
-                <p className="mt-4 rounded-md bg-slate-50 p-3 text-sm text-muted-foreground">
-                  Ainda não respondeu a nenhuma pergunta do menu.
-                </p>
-              )}
+                  </details>
+                ) : null}
 
-              <footer className="mt-4 flex items-center justify-between gap-3 text-xs text-muted-foreground">
-                <span>Última mensagem: {formatDate(conversation.last_message_at)}</span>
-                <Link
-                  href={`/inbox?conversation=${conversation.id}` as Route}
-                  className="inline-flex items-center gap-1.5 rounded-md border bg-white px-3 py-1.5 font-medium text-slate-700 transition hover:bg-muted"
-                >
-                  <MessageCircle className="h-3.5 w-3.5" />
-                  Abrir conversa
-                </Link>
-              </footer>
-            </article>
-          ))}
+                <footer className="mt-4 flex flex-wrap items-center justify-between gap-3 text-xs text-muted-foreground">
+                  <span>Última mensagem: {formatDateTime(conversation.last_message_at)}</span>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Link
+                      href={`/inbox?conversation=${conversation.id}` as Route}
+                      className="inline-flex items-center gap-1.5 rounded-md border bg-white px-3 py-1.5 font-medium text-slate-700 transition hover:bg-muted"
+                    >
+                      <MessageCircle className="h-3.5 w-3.5" />
+                      Abrir conversa
+                    </Link>
+                    {canManage ? <DeleteClientButton conversationId={conversation.id} /> : null}
+                  </div>
+                </footer>
+              </article>
+            );
+          })}
         </div>
       ) : (
         <EmptyState
@@ -191,6 +204,35 @@ export default async function ClientsPage({ searchParams }: { searchParams: Prom
         />
       )}
     </>
+  );
+}
+
+function RequestAnswers({ request, className }: { request: MenuRequest; className?: string }) {
+  return (
+    <div className={className}>
+      {request.answers.length ? (
+        <dl className="divide-y rounded-md border bg-white">
+          {request.answers.map((item, index) => (
+            <div key={`${item.question}-${index}`} className="flex items-start justify-between gap-4 px-3 py-2">
+              <dt className="shrink-0 text-xs text-muted-foreground">{item.question}</dt>
+              <dd className="whitespace-pre-wrap break-words text-right text-sm font-medium text-slate-900">
+                {item.answer}
+              </dd>
+            </div>
+          ))}
+        </dl>
+      ) : (
+        <p className="rounded-md bg-slate-50 p-3 text-sm text-muted-foreground">
+          Ainda não respondeu a nenhuma pergunta do menu.
+        </p>
+      )}
+      {request.afterHandoff ? (
+        <p className="mt-2 text-xs text-muted-foreground">
+          {request.afterHandoff} {request.afterHandoff === 1 ? "mensagem" : "mensagens"} depois do encaminhamento. Veja na
+          conversa.
+        </p>
+      ) : null}
+    </div>
   );
 }
 
@@ -219,8 +261,4 @@ function buildHref(params: { q?: string; topic?: string }) {
   const query = search.toString();
 
   return `/clients${query ? `?${query}` : ""}` as Route;
-}
-
-function formatDate(value: string | null) {
-  return formatDateTime(value);
 }
