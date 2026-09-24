@@ -4,7 +4,7 @@ import { scheduleBrokerProgressChecks } from "@/services/broker-sla/workflow";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { isIgnoredPhone } from "@/services/contacts/ignored-numbers";
 import { findUazapiOrganizationByToken } from "@/services/integrations/config";
-import { processUazapiLeadMessage } from "@/services/uazapi/lead-workflow";
+import { pauseBotForHumanMessage, processUazapiLeadMessage } from "@/services/uazapi/lead-workflow";
 import {
   describeUazapiPayloadShape,
   parseUazapiWebhook,
@@ -14,6 +14,7 @@ import {
 } from "@/services/uazapi/webhook-payload";
 
 type IncomingMessage = Extract<ParsedUazapiWebhook, { kind: "message" }>;
+type OwnMessage = Extract<ParsedUazapiWebhook, { kind: "own_message" }>;
 type AdminClient = ReturnType<typeof createAdminClient>;
 
 export async function POST(request: Request) {
@@ -59,6 +60,29 @@ export async function POST(request: Request) {
 
   const safePayload = redactUazapiPayload(payload);
 
+  // A equipa respondeu pelo próprio WhatsApp: grava e pausa o bot nessa conversa.
+  if (message.kind === "own_message") {
+    after(async () => {
+      try {
+        await handleOwnMessage(supabase, message, phone, safePayload);
+      } catch (error) {
+        await supabase.from("webhook_logs").insert({
+          organization_id: null,
+          provider: "uazapi",
+          event_type: "processing_error",
+          payload: {
+            error: error instanceof Error ? error.message : "Erro desconhecido.",
+            externalMessageId: message.externalMessageId,
+            instanceName: message.instanceName
+          },
+          status: "failed"
+        });
+      }
+    });
+
+    return NextResponse.json({ received: true, own: true });
+  }
+
   // A Uazapi pede resposta 200 imediata. O agente roda num modelo local que pode levar
   // mais de um minuto; segurar a requisição até lá faria a Uazapi reenviar a mensagem
   // e o lead receberia a resposta em dobro. `after` processa depois de responder.
@@ -97,6 +121,31 @@ async function logIgnoredWebhook(payload: UazapiWebhookPayload, reason: string) 
   } catch {
     // Diagnóstico não pode derrubar o webhook.
   }
+}
+
+async function handleOwnMessage(
+  supabase: AdminClient,
+  message: OwnMessage,
+  phone: string,
+  payload: UazapiWebhookPayload
+) {
+  const organizationId =
+    (await findUazapiOrganizationByToken(supabase, message.instanceToken)) ??
+    (await resolveLeadOrganization(supabase, phone));
+
+  if (!organizationId || (await isIgnoredPhone(supabase, phone, organizationId))) {
+    return;
+  }
+
+  await pauseBotForHumanMessage({
+    supabase,
+    organizationId,
+    phone,
+    text: message.text,
+    payload,
+    instance: { token: message.instanceToken, name: message.instanceName },
+    externalMessageId: message.externalMessageId
+  });
 }
 
 async function handleIncomingMessage(

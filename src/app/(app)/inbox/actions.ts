@@ -99,7 +99,8 @@ export async function sendManualReplyAction(
         external_message_id: result.externalMessageId,
         payload: result.payload
       }),
-      supabase.from("conversations").update({ last_message_at: now }).eq("id", conversation.id)
+      // Resposta manual: o bot sai da conversa, senão ele responderia por cima da equipa.
+      supabase.from("conversations").update({ last_message_at: now, ai_enabled: false }).eq("id", conversation.id)
     ]);
 
     await scheduleLeadFollowups({

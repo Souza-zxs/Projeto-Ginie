@@ -217,3 +217,18 @@ export function detectMenuProgress(messages: MenuHistoryMessage[]): MenuProgress
 
   return lastStep === "done" ? "handed_off" : "in_progress";
 }
+
+export type ClientStatus = { label: string; tone: "default" | "warning" | "success" };
+
+/** Estado mostrado ao lado do cliente: cruza o ponto do menu com o bot estar ativo ou pausado. */
+export function describeClientStatus(progress: MenuProgress, botActive: boolean): ClientStatus {
+  if (progress === "handed_off") {
+    return { label: "Encaminhado para a equipa", tone: "warning" };
+  }
+
+  if (!botActive) {
+    return { label: "Em atendimento pela equipa", tone: "warning" };
+  }
+
+  return { label: "A responder ao bot", tone: "default" };
+}

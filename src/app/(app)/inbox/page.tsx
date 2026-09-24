@@ -19,6 +19,7 @@ import { formatPhoneForDisplay } from "@/lib/phone";
 import { createClient } from "@/lib/supabase/server";
 import {
   TOPIC_LABELS,
+  describeClientStatus,
   detectMenuProgress,
   detectMenuTopic,
   extractMenuAnswers
@@ -455,8 +456,8 @@ function ClientPanel({
           <div className="flex flex-wrap gap-2">
             {topic ? <Badge tone="muted">{TOPIC_LABELS[topic]}</Badge> : null}
             {progress !== "no_menu" ? (
-              <Badge tone={progress === "handed_off" ? "warning" : "default"}>
-                {progress === "handed_off" ? "Encaminhado para a equipa" : "A responder ao bot"}
+              <Badge tone={describeClientStatus(progress, conversation.ai_enabled).tone}>
+                {describeClientStatus(progress, conversation.ai_enabled).label}
               </Badge>
             ) : null}
           </div>

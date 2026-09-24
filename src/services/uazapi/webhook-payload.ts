@@ -49,6 +49,16 @@ export type UazapiWebhookPayload = {
 export type ParsedUazapiWebhook =
   | { kind: "ignored"; reason: string }
   | {
+      /** Mensagem digitada por uma pessoa da equipa no próprio WhatsApp do número (fromMe). */
+      kind: "own_message";
+      /** Telefone do contacto com quem a equipa falou (o chatid, não o nosso). */
+      rawPhone: string;
+      text: string;
+      externalMessageId: string | null;
+      instanceToken: string | null;
+      instanceName: string | null;
+    }
+  | {
       kind: "message";
       /** Dígitos do telefone como vieram (antes do "@"); normalizar com normalizePhone. */
       rawPhone: string;
@@ -124,6 +134,19 @@ function jidDigits(jid: string | undefined) {
   return jid.split("@")[0].replace(/\D/g, "");
 }
 
+const OWN_MESSAGE_LABELS: Record<string, string> = {
+  AudioMessage: "[áudio]",
+  ImageMessage: "[imagem]",
+  VideoMessage: "[vídeo]",
+  DocumentMessage: "[documento]",
+  StickerMessage: "[sticker]"
+};
+
+/** Texto de reserva para mensagem da equipa sem legenda (áudio, imagem...). */
+function ownMessageLabel(messageType: string | undefined) {
+  return (messageType && OWN_MESSAGE_LABELS[messageType]) || "[mensagem]";
+}
+
 export function parseUazapiWebhook(payload: UazapiWebhookPayload): ParsedUazapiWebhook {
   const eventType = payload.EventType ?? payload.event;
 
@@ -134,7 +157,31 @@ export function parseUazapiWebhook(payload: UazapiWebhookPayload): ParsedUazapiW
   const message = extractMessage(payload);
 
   if (message?.fromMe) {
-    return { kind: "ignored", reason: "ignored_own_message" };
+    // Enviada pela API (o bot) ou em grupo: não é a equipa a falar com um contacto.
+    if (message.isGroup || message.wasSentByApi) {
+      return { kind: "ignored", reason: "ignored_own_message" };
+    }
+
+    // Reação (👍) não é atendimento: não pausa o bot.
+    if (message.messageType === "ReactionMessage") {
+      return { kind: "ignored", reason: "ignored_own_reaction" };
+    }
+
+    // Em mensagem nossa o `sender` somos nós; o contacto é o chatid.
+    const contactPhone = jidDigits(message.chatid);
+
+    if (!contactPhone) {
+      return { kind: "ignored", reason: "ignored_own_message" };
+    }
+
+    return {
+      kind: "own_message",
+      rawPhone: contactPhone,
+      text: (message.text ?? "").trim() || ownMessageLabel(message.messageType),
+      externalMessageId: message.messageid || message.id || null,
+      instanceToken: payload.token || null,
+      instanceName: payload.instanceName || payload.instance || null
+    };
   }
 
   if (message?.isGroup) {

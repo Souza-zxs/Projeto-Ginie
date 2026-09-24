@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { MENU_CHOICE_ROWS } from "./menu-bot.ts";
-import { detectMenuProgress, detectMenuTopic, displayAnswer, extractMenuAnswers } from "./menu-answers.ts";
+import { describeClientStatus, detectMenuProgress, detectMenuTopic, displayAnswer, extractMenuAnswers } from "./menu-answers.ts";
 
 const bot = (step, content = "pergunta") => ({ direction: "outbound", content, menu_step: step });
 const client = (content) => ({ direction: "inbound", content, menu_step: null });
@@ -204,4 +204,20 @@ test("confirmação do nome e zona da candidatura", () => {
   ];
 
   assert.deepEqual(extractMenuAnswers(messages), [{ question: "Nome e zona", answer: "Ana Costa, Porto" }]);
+});
+
+test("estado do cliente: encaminhado, em atendimento pela equipa (bot pausado) ou com o bot", () => {
+  assert.deepEqual(describeClientStatus("handed_off", false), { label: "Encaminhado para a equipa", tone: "warning" });
+  assert.deepEqual(describeClientStatus("in_progress", false), { label: "Em atendimento pela equipa", tone: "warning" });
+  assert.deepEqual(describeClientStatus("in_progress", true), { label: "A responder ao bot", tone: "default" });
+});
+
+test("mensagem manual da equipa (sem menu_step) no meio do fluxo não vira resposta do cliente", () => {
+  const messages = [
+    bot("awaiting_1_zone"),
+    { direction: "outbound", content: "Olá, sou da equipa", menu_step: null },
+    client("Lisboa")
+  ];
+
+  assert.deepEqual(extractMenuAnswers(messages), [{ question: "Localidade", answer: "Lisboa" }]);
 });

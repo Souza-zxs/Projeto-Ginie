@@ -10,6 +10,7 @@ import {
 } from "@/services/integrations/config";
 import { getKnownLeadFacts, upsertLeadFromQualification } from "@/services/leads/workflow";
 import { isNightTime } from "@/lib/service-hours";
+import { shouldResumeBot } from "@/services/uazapi/bot-resume";
 import { decideMenuReply, readMenuStep } from "@/services/uazapi/menu-bot";
 import { sendUazapiList, sendUazapiMessage } from "@/services/uazapi/send-message";
 
@@ -79,6 +80,15 @@ export async function processUazapiLeadMessage({
       .eq("id", conversation.id);
   }
 
+  // Última mensagem da conversa antes desta (de qualquer lado): base da regra das 24h.
+  const { data: previousMessage } = await supabase
+    .from("messages")
+    .select("created_at")
+    .eq("conversation_id", conversation.id)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle<{ created_at: string }>();
+
   await supabase.from("messages").insert({
     organization_id: organizationId,
     conversation_id: conversation.id,
@@ -92,7 +102,23 @@ export async function processUazapiLeadMessage({
     payload
   });
 
-  if (!conversation.ai_enabled) {
+  // Bot pausado (equipa respondeu ou já encaminhou): volta se a conversa ficou 24h em
+  // silêncio. Cada mensagem da equipa reinicia essa contagem. Ao voltar, recomeça pelo menu.
+  const resumeBot = shouldResumeBot({
+    botActive: conversation.ai_enabled,
+    lastMessageAt: previousMessage?.created_at
+  });
+
+  // A mensagem que chegou sobe a conversa na lista do Inbox, mesmo com o bot pausado.
+  await supabase
+    .from("conversations")
+    .update({
+      last_message_at: new Date().toISOString(),
+      ...(resumeBot ? { ai_enabled: true } : {})
+    })
+    .eq("id", conversation.id);
+
+  if (!conversation.ai_enabled && !resumeBot) {
     return { processed: true, ai: false, conversationId: conversation.id };
   }
 
@@ -105,7 +131,8 @@ export async function processUazapiLeadMessage({
       phone: normalizedPhone,
       text,
       choiceId,
-      instance
+      instance,
+      restart: resumeBot
     });
   }
 
@@ -185,6 +212,69 @@ export async function processUazapiLeadMessage({
   return { processed: true, ai: true, leadId: lead.id, conversationId: conversation.id };
 }
 
+type HumanMessageInput = {
+  supabase: SupabaseClient;
+  organizationId: string;
+  phone: string;
+  text: string;
+  payload: unknown;
+  instance?: UazapiInstanceRef;
+  externalMessageId?: string | null;
+};
+
+/**
+ * A equipa escreveu à pessoa pelo WhatsApp do próprio número. Grava a mensagem no Inbox e
+ * pausa o bot nessa conversa, para ele não responder por cima do atendimento humano. Se a
+ * conversa ainda não existia (a equipa falou primeiro), ela nasce com o bot pausado.
+ */
+export async function pauseBotForHumanMessage({
+  supabase,
+  organizationId,
+  phone,
+  text,
+  payload,
+  instance,
+  externalMessageId
+}: HumanMessageInput) {
+  const normalizedPhone = normalizePhone(phone) ?? phone.replace(/\D/g, "");
+  const { contact, conversation } = await findOrCreateUazapiConversation({
+    supabase,
+    organizationId,
+    phone: normalizedPhone,
+    payload
+  });
+  const integrationRow = await getUazapiIntegrationRow(supabase, organizationId, instance);
+  const now = new Date().toISOString();
+
+  await supabase.from("messages").insert({
+    organization_id: organizationId,
+    conversation_id: conversation.id,
+    contact_id: contact.id,
+    direction: "outbound",
+    channel: "uazapi",
+    type: "text",
+    content: text,
+    status: "sent",
+    external_message_id: externalMessageId ?? null,
+    payload: { source: "phone" }
+  });
+
+  await supabase
+    .from("conversations")
+    .update({ ai_enabled: false, last_message_at: now })
+    .eq("id", conversation.id);
+
+  // Best-effort, como no fluxo de entrada: se a coluna não existir, o atendimento segue.
+  if (integrationRow) {
+    await supabase
+      .from("conversations")
+      .update({ uazapi_integration_id: integrationRow.id })
+      .eq("id", conversation.id);
+  }
+
+  return { conversationId: conversation.id, paused: true };
+}
+
 async function runMenuBot({
   supabase,
   organizationId,
@@ -193,7 +283,8 @@ async function runMenuBot({
   phone,
   text,
   choiceId,
-  instance
+  instance,
+  restart = false
 }: {
   supabase: SupabaseClient;
   organizationId: string;
@@ -203,6 +294,8 @@ async function runMenuBot({
   text: string;
   choiceId?: string | null;
   instance?: UazapiInstanceRef;
+  /** O bot acabou de ser retomado: ignora a etapa antiga e começa pelo menu. */
+  restart?: boolean;
 }) {
   // O estado do menu vive no payload da última mensagem que o bot enviou.
   const { data: lastOutbound } = await supabase
@@ -216,7 +309,7 @@ async function runMenuBot({
     .maybeSingle<{ payload: Record<string, unknown> | null }>();
 
   const decision = decideMenuReply({
-    lastStep: readMenuStep(lastOutbound?.payload?.menu_step),
+    lastStep: restart ? null : readMenuStep(lastOutbound?.payload?.menu_step),
     text,
     choiceId,
     night: isNightTime(),

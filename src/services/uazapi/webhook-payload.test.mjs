@@ -87,8 +87,39 @@ test("ignora outros eventos (status, conexão)", () => {
   assert.equal(parseUazapiWebhook({ ...docExample, EventType: "connection" }).kind, "ignored");
 });
 
-test("ignora mensagem enviada pelo próprio número", () => {
-  assert.equal(parseUazapiWebhook(withMessage({ fromMe: true })).reason, "ignored_own_message");
+test("mensagem digitada pela equipa no próprio WhatsApp vira own_message, com o telefone do contacto", () => {
+  const parsed = parseUazapiWebhook(
+    withMessage({
+      fromMe: true,
+      chatid: "351912345678@s.whatsapp.net",
+      sender: "351900000000@s.whatsapp.net",
+      messageType: "ExtendedTextMessage",
+      text: "Bom dia, aqui é da DAR+."
+    })
+  );
+
+  assert.equal(parsed.kind, "own_message");
+  assert.equal(parsed.rawPhone, "351912345678"); // o contacto, não o número da empresa
+  assert.equal(parsed.text, "Bom dia, aqui é da DAR+.");
+  assert.equal(parsed.instanceToken, "INSTANCE_TOKEN");
+});
+
+test("mensagem da equipa sem legenda usa um texto de reserva", () => {
+  const audio = parseUazapiWebhook(withMessage({ fromMe: true, text: "", messageType: "AudioMessage" }));
+  const other = parseUazapiWebhook(withMessage({ fromMe: true, text: "", messageType: "ProtocolMessage" }));
+
+  assert.equal(audio.text, "[áudio]");
+  assert.equal(other.text, "[mensagem]");
+});
+
+test("não pausa o bot por reação, por envio da API, por grupo ou sem telefone do contacto", () => {
+  assert.equal(parseUazapiWebhook(withMessage({ fromMe: true, messageType: "ReactionMessage" })).reason, "ignored_own_reaction");
+  assert.equal(parseUazapiWebhook(withMessage({ fromMe: true, wasSentByApi: true })).reason, "ignored_own_message");
+  assert.equal(
+    parseUazapiWebhook(withMessage({ fromMe: true, isGroup: true, chatid: "120363000000000000@g.us" })).reason,
+    "ignored_own_message"
+  );
+  assert.equal(parseUazapiWebhook(withMessage({ fromMe: true, chatid: "123@lid" })).reason, "ignored_own_message");
 });
 
 test("ignora mensagem enviada pela própria API (a resposta do agente)", () => {

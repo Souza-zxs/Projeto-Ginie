@@ -13,6 +13,7 @@ import { cn } from "@/lib/utils";
 import {
   TOPIC_LABELS,
   detectMenuProgress,
+  describeClientStatus,
   detectMenuTopic,
   extractMenuAnswers,
   type MenuHistoryMessage,
@@ -160,8 +161,8 @@ export default async function ClientsPage({ searchParams }: { searchParams: Prom
                 </div>
                 <div className="flex flex-wrap justify-end gap-2">
                   {topic ? <Badge tone="muted">{TOPIC_LABELS[topic]}</Badge> : null}
-                  <Badge tone={progress === "handed_off" ? "warning" : "default"}>
-                    {progress === "handed_off" ? "Encaminhado para a equipa" : "A responder ao bot"}
+                  <Badge tone={describeClientStatus(progress, conversation.ai_enabled).tone}>
+                    {describeClientStatus(progress, conversation.ai_enabled).label}
                   </Badge>
                 </div>
               </header>
