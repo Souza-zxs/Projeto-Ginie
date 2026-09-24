@@ -46,6 +46,8 @@ export type UazapiWebhookPayload = {
   clienteId?: string;
 };
 
+export type InboundMediaType = "audio" | "image" | "video" | "document";
+
 export type ParsedUazapiWebhook =
   | { kind: "ignored"; reason: string }
   | {
@@ -65,6 +67,8 @@ export type ParsedUazapiWebhook =
       text: string;
       /** ID do item escolhido numa lista/botão; null em mensagem de texto normal. */
       choiceId: string | null;
+      /** Tipo de mídia quando a mensagem é só áudio/imagem/vídeo/documento (sem legenda). */
+      mediaType: InboundMediaType | null;
       /** ID da mensagem no WhatsApp, usado para descartar reenvios do mesmo webhook. */
       externalMessageId: string | null;
       /** Token da instância que recebeu: identifica o número sem configuração manual. */
@@ -132,6 +136,18 @@ function jidDigits(jid: string | undefined) {
   }
 
   return jid.split("@")[0].replace(/\D/g, "");
+}
+
+const INBOUND_MEDIA: Array<{ pattern: RegExp; type: InboundMediaType; label: string }> = [
+  { pattern: /audio|ptt/i, type: "audio", label: "[áudio]" },
+  { pattern: /image/i, type: "image", label: "[imagem]" },
+  { pattern: /video/i, type: "video", label: "[vídeo]" },
+  { pattern: /document/i, type: "document", label: "[documento]" },
+  { pattern: /sticker/i, type: "image", label: "[sticker]" }
+];
+
+function inboundMediaOf(messageType: string | undefined) {
+  return messageType ? (INBOUND_MEDIA.find((item) => item.pattern.test(messageType)) ?? null) : null;
 }
 
 const OWN_MESSAGE_LABELS: Record<string, string> = {
@@ -210,15 +226,20 @@ export function parseUazapiWebhook(payload: UazapiWebhookPayload): ParsedUazapiW
   // Em resposta de lista o texto vem vazio: o rótulo tocado (ou, sem ele, o id) faz de texto.
   const text = (message?.text ?? payload.text ?? legacyText ?? "").trim() || choiceTitle || (choiceId ?? "");
 
-  if (!text) {
+  // Áudio, imagem, vídeo ou documento sem legenda: antes era descartado e a pessoa ficava
+  // sem resposta. Agora entra (com um rótulo no lugar do texto) e o bot pede texto/opção.
+  const media = text ? null : inboundMediaOf(message?.messageType);
+
+  if (!text && !media) {
     return { kind: "ignored", reason: "empty_text" };
   }
 
   return {
     kind: "message",
     rawPhone,
-    text,
+    text: text || (media?.label ?? ""),
     choiceId,
+    mediaType: media?.type ?? null,
     externalMessageId: message?.messageid || message?.id || null,
     instanceToken: payload.token || null,
     instanceName: payload.instanceName || payload.instance || null,

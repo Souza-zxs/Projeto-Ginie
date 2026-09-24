@@ -147,6 +147,12 @@ export function extractMenuAnswers(messages: MenuHistoryMessage[]): MenuAnswer[]
     }
 
     const text = (message.content ?? "").trim();
+
+    // "[áudio]", "[imagem]"...: mídia que o bot não lê. Não é resposta a nenhuma pergunta.
+    if (/^\[[^\]]{1,20}\]$/.test(text) && pendingStep !== "done") {
+      continue;
+    }
+
     const confirmStep: ConfirmStep | undefined = pendingStep ? CONFIRM_STEPS[pendingStep] : undefined;
 
     if (confirmStep) {

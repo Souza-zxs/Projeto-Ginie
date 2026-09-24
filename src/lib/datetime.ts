@@ -109,3 +109,8 @@ export function parseLisbonLocalDateTime(value: string) {
 
   return new Date(instant);
 }
+
+/** Instante atual em ms. Função à parte para páginas de servidor calcularem "há quanto tempo" sem chamar Date.now() dentro do componente. */
+export function nowMs() {
+  return Date.now();
+}

@@ -328,3 +328,44 @@ test("as perguntas de texto livre avisam que dá para escrever 'voltar'", () => 
   assert.match(zone.replies[0], /voltar/);
   assert.match(details.replies[0], /voltar/);
 });
+
+test("áudio/imagem numa pergunta: pede texto ou opção, repete a pergunta e mantém a etapa", () => {
+  for (const step of ["menu", "awaiting_1", "awaiting_1_type", "awaiting_1_urgency", "awaiting_2", "awaiting_3", "awaiting_1_confirm", "awaiting_3_confirm"]) {
+    const decision = decideMenuReply({ lastStep: step, text: "[áudio]", isMedia: true, night: false });
+
+    assert.equal(decision.nextStep, step, step);
+    assert.equal(decision.handoff, false, step);
+    assert.equal(decision.mediaRetry, true, step);
+    assert.match(decision.replies[0], /Só consigo ler mensagens de texto/, step);
+    assert.ok(decision.list, `${step} deve repetir a lista`);
+    assert.match(decision.list.text, /Só consigo ler mensagens de texto/, step);
+  }
+
+  for (const step of ["awaiting_1_zone", "awaiting_1_zone_retry", "awaiting_3_details", "awaiting_3_details_retry"]) {
+    const decision = decideMenuReply({ lastStep: step, text: "[áudio]", isMedia: true, night: false });
+
+    assert.equal(decision.nextStep, step, step);
+    assert.equal(decision.list, undefined, step);
+    assert.match(decision.replies[0], /Só consigo ler mensagens de texto/, step);
+  }
+});
+
+test("insistir com mídia depois do pedido encaminha para a equipa", () => {
+  const day = decideMenuReply({ lastStep: "awaiting_1_type", text: "[áudio]", isMedia: true, mediaRetry: true, night: false });
+  const night = decideMenuReply({ lastStep: "awaiting_1_zone", text: "[imagem]", isMedia: true, mediaRetry: true, night: true });
+
+  assert.deepEqual(day, { replies: [HANDOFF_DAY], nextStep: "done", handoff: true });
+  assert.deepEqual(night, { replies: [HANDOFF_NIGHT], nextStep: "done", handoff: true });
+});
+
+test("mídia como primeira mensagem abre o menu normalmente; texto depois do pedido segue o fluxo", () => {
+  const first = decideMenuReply({ lastStep: null, text: "[áudio]", isMedia: true, night: false });
+
+  assert.equal(first.nextStep, "menu");
+  assert.equal(first.mediaRetry, undefined);
+
+  const answered = decideMenuReply({ lastStep: "awaiting_1_type", text: "Companhia", choiceId: "h3", mediaRetry: true, night: false });
+
+  assert.equal(answered.nextStep, "awaiting_1_urgency");
+  assert.equal(answered.handoff, false);
+});

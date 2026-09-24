@@ -7,14 +7,13 @@ import {
   MessageCircle,
   Phone,
   Search,
-  Send,
   UserRound
 } from "lucide-react";
 import { Badge } from "@/components/badge";
 import { PageHeader } from "@/components/page-header";
 import { cn } from "@/lib/utils";
 import { getCurrentProfile } from "@/lib/auth/organization";
-import { formatDateTime, formatShortDateTime, formatTime } from "@/lib/datetime";
+import { formatDateTime, formatShortDateTime, formatTime, nowMs } from "@/lib/datetime";
 import { formatPhoneForDisplay } from "@/lib/phone";
 import { createClient } from "@/lib/supabase/server";
 import {
@@ -24,9 +23,12 @@ import {
   detectMenuTopic,
   extractMenuAnswers
 } from "@/services/uazapi/menu-answers";
+import { computeAwaitingSince, formatWaiting } from "@/services/uazapi/awaiting-team";
+import { loadConversationHistory } from "@/services/uazapi/history";
 import { AgentTester } from "./agent-tester";
 import { AutoRefresh } from "@/components/auto-refresh";
 import { ChatMessages } from "./chat-messages";
+import { IgnoreNumberButton } from "./ignore-number-button";
 import { ManualReplyForm } from "./manual-reply-form";
 import { toggleAiAction } from "./actions";
 
@@ -100,6 +102,25 @@ export default async function InboxPage({
     .returns<Array<{ id: string; name: string; agent_type: string }>>();
 
   const allConversations = conversations ?? [];
+
+  // Conversas encaminhadas (ou com o bot pausado pela equipa) que ainda esperam resposta humana.
+  const recentHistory = await loadConversationHistory(
+    supabase,
+    profile.organization_id,
+    allConversations.filter((conversation) => conversation.channel === "uazapi").map((conversation) => conversation.id),
+    { sinceDays: 14 }
+  );
+  const awaitingSince = new Map<string, Date>();
+
+  for (const conversation of allConversations) {
+    const since = computeAwaitingSince(recentHistory.get(conversation.id) ?? [], !conversation.ai_enabled);
+
+    if (since) {
+      awaitingSince.set(conversation.id, since);
+    }
+  }
+
+  const renderedAt = nowMs();
   const filteredConversations = allConversations.filter((conversation) => {
     const haystack = [
       conversation.contacts?.name,
@@ -114,6 +135,7 @@ export default async function InboxPage({
     const matchesChannel =
       channelFilter === "all" ||
       (channelFilter === "ai" && conversation.ai_enabled) ||
+      (channelFilter === "waiting" && awaitingSince.has(conversation.id)) ||
       conversation.channel === channelFilter;
 
     return matchesSearch && matchesChannel;
@@ -134,7 +156,6 @@ export default async function InboxPage({
 
   const openCount = allConversations.filter((conversation) => conversation.status !== "closed").length;
   const aiCount = allConversations.filter((conversation) => conversation.ai_enabled).length;
-  const metaCount = allConversations.filter((conversation) => conversation.channel === "meta").length;
   const uazapiCount = allConversations.filter((conversation) => conversation.channel === "uazapi").length;
 
   return (
@@ -148,7 +169,7 @@ export default async function InboxPage({
       <section className="mb-5 grid gap-3 md:grid-cols-4">
         <Metric icon={<MessageCircle className="h-4 w-4" />} label="Abertas" value={String(openCount)} />
         <Metric icon={<Bot className="h-4 w-4" />} label="IA ativa" value={String(aiCount)} />
-        <Metric icon={<Send className="h-4 w-4" />} label="Meta" value={String(metaCount)} />
+        <Metric icon={<Clock3 className="h-4 w-4" />} label="Aguardando equipa" value={String(awaitingSince.size)} />
         <Metric icon={<Phone className="h-4 w-4" />} label="Uazapi" value={String(uazapiCount)} />
       </section>
 
@@ -186,8 +207,8 @@ export default async function InboxPage({
               <FilterLink active={channelFilter === "all"} href={buildInboxHref({ q: searchQuery })}>
                 Todas
               </FilterLink>
-              <FilterLink active={channelFilter === "meta"} href={buildInboxHref({ q: searchQuery, channel: "meta" })}>
-                Meta
+              <FilterLink active={channelFilter === "waiting"} href={buildInboxHref({ q: searchQuery, channel: "waiting" })}>
+                Aguardando
               </FilterLink>
               <FilterLink active={channelFilter === "uazapi"} href={buildInboxHref({ q: searchQuery, channel: "uazapi" })}>
                 Uazapi
@@ -205,6 +226,7 @@ export default async function InboxPage({
                   key={conversation.id}
                   conversation={conversation}
                   active={conversation.id === activeConversation?.id}
+                  waitingMs={awaitingSince.has(conversation.id) ? renderedAt - (awaitingSince.get(conversation.id) as Date).getTime() : null}
                   href={buildInboxHref({
                     conversation: conversation.id,
                     q: searchQuery,
@@ -224,7 +246,10 @@ export default async function InboxPage({
           {activeConversation ? (
             <>
               <ChatHeader conversation={activeConversation} />
-              <ConversationActions conversation={activeConversation} />
+              <ConversationActions
+                conversation={activeConversation}
+                canManage={profile.role === "admin" || profile.role === "manager"}
+              />
 
               <ChatMessages conversationId={activeConversation.id} messageCount={messages?.length ?? 0}>
                 {messages?.length ? (
@@ -304,10 +329,13 @@ function FilterLink({
 function ConversationItem({
   conversation,
   active,
+  waitingMs,
   href
 }: {
   conversation: ConversationRow;
   active: boolean;
+  /** Há quanto tempo espera resposta da equipa; null se não espera. */
+  waitingMs: number | null;
   href: Route;
 }) {
   const name = conversation.contacts?.name || "Sem nome";
@@ -343,6 +371,11 @@ function ConversationItem({
             <Badge tone={conversation.ai_enabled ? "success" : "muted"}>
               IA {conversation.ai_enabled ? "on" : "off"}
             </Badge>
+            {waitingMs !== null ? (
+              <Badge tone={waitingMs >= 2 * 3_600_000 ? "danger" : "warning"}>
+                Sem resposta há {formatWaiting(waitingMs)}
+              </Badge>
+            ) : null}
             <Badge tone="muted">{conversation.current_stage}</Badge>
           </div>
         </div>
@@ -381,7 +414,7 @@ function ChatHeader({ conversation }: { conversation: ConversationRow }) {
   );
 }
 
-function ConversationActions({ conversation }: { conversation: ConversationRow }) {
+function ConversationActions({ conversation, canManage }: { conversation: ConversationRow; canManage: boolean }) {
   return (
     <div className="flex flex-wrap gap-2 border-b bg-white px-5 py-3">
       <form action={toggleAiAction}>
@@ -392,6 +425,7 @@ function ConversationActions({ conversation }: { conversation: ConversationRow }
           {conversation.ai_enabled ? "Pausar bot" : "Ativar bot"}
         </button>
       </form>
+      {canManage && conversation.channel === "uazapi" ? <IgnoreNumberButton conversationId={conversation.id} /> : null}
     </div>
   );
 }
@@ -575,6 +609,10 @@ function channelLabel(channel?: string | null) {
 
   if (channel === "meta") {
     return "Meta";
+  }
+
+  if (channel === "waiting") {
+    return "Aguardando";
   }
 
   if (channel === "ai") {

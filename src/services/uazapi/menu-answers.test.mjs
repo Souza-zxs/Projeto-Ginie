@@ -221,3 +221,18 @@ test("mensagem manual da equipa (sem menu_step) no meio do fluxo não vira respo
 
   assert.deepEqual(extractMenuAnswers(messages), [{ question: "Localidade", answer: "Lisboa" }]);
 });
+
+test("mídia que o bot não lê ([áudio], [imagem]) não vira resposta, mas aparece depois do encaminhamento", () => {
+  const messages = [
+    bot("awaiting_1_zone"), client("[áudio]"),
+    bot("awaiting_1_zone", "só texto"), client("Lisboa"),
+    bot("awaiting_1_confirm"), client("[imagem]"),
+    bot("awaiting_1_confirm"), client("Sim"),
+    bot("done"), client("[áudio]")
+  ];
+
+  assert.deepEqual(extractMenuAnswers(messages), [
+    { question: "Localidade", answer: "Lisboa" },
+    { question: "Depois do encaminhamento", answer: "[áudio]" }
+  ]);
+});

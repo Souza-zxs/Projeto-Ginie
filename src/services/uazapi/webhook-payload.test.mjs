@@ -31,6 +31,7 @@ test("lê o exemplo oficial da documentação", () => {
     rawPhone: "5511888888888",
     text: "Olá, preciso de ajuda.",
     choiceId: null,
+    mediaType: null,
     externalMessageId: "MSG_EXEMPLO",
     instanceToken: "INSTANCE_TOKEN",
     instanceName: "Atendimento",
@@ -145,8 +146,31 @@ test("sem telefone utilizável, ignora", () => {
   assert.deepEqual(parsed, { kind: "ignored", reason: "phone_not_found" });
 });
 
-test("mídia sem legenda (texto vazio) é ignorada", () => {
-  assert.equal(parseUazapiWebhook(withMessage({ text: "", messageType: "AudioMessage" })).reason, "empty_text");
+test("mídia sem legenda entra com um rótulo no lugar do texto", () => {
+  const cases = [
+    ["AudioMessage", "audio", "[áudio]"],
+    ["ImageMessage", "image", "[imagem]"],
+    ["VideoMessage", "video", "[vídeo]"],
+    ["DocumentMessage", "document", "[documento]"],
+    ["StickerMessage", "image", "[sticker]"]
+  ];
+
+  for (const [messageType, mediaType, label] of cases) {
+    const parsed = parseUazapiWebhook(withMessage({ text: "", messageType }));
+
+    assert.equal(parsed.kind, "message", messageType);
+    assert.equal(parsed.mediaType, mediaType, messageType);
+    assert.equal(parsed.text, label, messageType);
+  }
+});
+
+test("mídia com legenda é texto normal; evento sem texto nem mídia continua ignorado", () => {
+  const withCaption = parseUazapiWebhook(withMessage({ text: "Segue a foto", messageType: "ImageMessage" }));
+
+  assert.equal(withCaption.text, "Segue a foto");
+  assert.equal(withCaption.mediaType, null);
+  assert.equal(parseUazapiWebhook(withMessage({ text: "", messageType: "ProtocolMessage" })).reason, "empty_text");
+  assert.equal(parseUazapiWebhook(withMessage({ text: "", messageType: "ReactionMessage" })).reason, "empty_text");
 });
 
 test("sem messageid, usa o id como identificador", () => {

@@ -182,6 +182,46 @@ async function sendUazapiManualReply({
   };
 }
 
+/**
+ * "Ignorar este número" pelo Inbox: põe o número na lista de ignorados (as próximas mensagens
+ * não são gravadas nem respondidas) e pausa o bot nesta conversa. Só admin e gestor, como em
+ * Configurações > Números ignorados, onde dá para desfazer.
+ */
+export async function ignoreConversationNumberAction(formData: FormData) {
+  const conversationId = String(formData.get("conversation_id") ?? "");
+  const supabase = await createClient();
+  const { profile } = await getCurrentProfile(supabase);
+
+  if (!profile || !conversationId || (profile.role !== "admin" && profile.role !== "manager")) {
+    return;
+  }
+
+  const { data: conversation } = await supabase
+    .from("conversations")
+    .select("id, contacts(phone)")
+    .eq("id", conversationId)
+    .eq("organization_id", profile.organization_id)
+    .maybeSingle<{ id: string; contacts: { phone: string } | null }>();
+  const phone = conversation?.contacts?.phone;
+
+  if (!conversation || !phone) {
+    return;
+  }
+
+  await supabase.from("ignored_phone_numbers").upsert(
+    { organization_id: profile.organization_id, phone, note: "Adicionado pelo Inbox" },
+    { onConflict: "organization_id,phone", ignoreDuplicates: true }
+  );
+  await supabase
+    .from("conversations")
+    .update({ ai_enabled: false })
+    .eq("id", conversation.id)
+    .eq("organization_id", profile.organization_id);
+
+  revalidatePath("/inbox");
+  revalidatePath("/settings/ignored-numbers");
+}
+
 export async function toggleAiAction(formData: FormData) {
   const conversationId = String(formData.get("conversation_id") ?? "");
   const aiEnabled = String(formData.get("ai_enabled") ?? "") === "true";

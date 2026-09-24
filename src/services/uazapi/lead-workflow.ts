@@ -36,6 +36,8 @@ type LeadMessageInput = {
   text: string;
   /** ID do item tocado numa lista interativa (menu do bot). */
   choiceId?: string | null;
+  /** Áudio/imagem/vídeo/documento sem legenda: o texto é só um rótulo, como "[áudio]". */
+  mediaType?: "audio" | "image" | "video" | "document" | null;
   payload: unknown;
   /** Instância (número) que recebeu a mensagem; a resposta sai por ela. */
   instance?: UazapiInstanceRef;
@@ -51,6 +53,7 @@ export async function processUazapiLeadMessage({
   phone,
   text,
   choiceId,
+  mediaType,
   payload,
   instance,
   externalMessageId,
@@ -95,7 +98,7 @@ export async function processUazapiLeadMessage({
     contact_id: contact.id,
     direction: "inbound",
     channel: "uazapi",
-    type: "text",
+    type: mediaType ?? "text",
     content: text,
     status: "received",
     external_message_id: externalMessageId ?? null,
@@ -131,6 +134,7 @@ export async function processUazapiLeadMessage({
       phone: normalizedPhone,
       text,
       choiceId,
+      isMedia: Boolean(mediaType),
       instance,
       restart: resumeBot
     });
@@ -283,6 +287,7 @@ async function runMenuBot({
   phone,
   text,
   choiceId,
+  isMedia = false,
   instance,
   restart = false
 }: {
@@ -293,6 +298,7 @@ async function runMenuBot({
   phone: string;
   text: string;
   choiceId?: string | null;
+  isMedia?: boolean;
   instance?: UazapiInstanceRef;
   /** O bot acabou de ser retomado: ignora a etapa antiga e começa pelo menu. */
   restart?: boolean;
@@ -312,6 +318,8 @@ async function runMenuBot({
     lastStep: restart ? null : readMenuStep(lastOutbound?.payload?.menu_step),
     text,
     choiceId,
+    isMedia,
+    mediaRetry: !restart && lastOutbound?.payload?.media_retry === true,
     night: isNightTime(),
     recruitmentFormUrl: process.env.RECRUITMENT_FORM_URL || null
   });
@@ -350,7 +358,7 @@ async function runMenuBot({
       type: "text",
       content: reply,
       status: "sent",
-      payload: { menu_step: decision.nextStep, sent_as: sentAs, result }
+      payload: { menu_step: decision.nextStep, sent_as: sentAs, media_retry: decision.mediaRetry === true, result }
     });
   }
 

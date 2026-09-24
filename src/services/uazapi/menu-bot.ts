@@ -27,6 +27,8 @@ export type MenuDecision = {
   handoff: boolean;
   /** Presente quando a resposta é o menu: enviar como lista clicável (replies fica de reserva em texto). */
   list?: MenuList;
+  /** true: o bot recusou uma mídia (áudio, imagem...) e pediu texto/opção; a próxima mídia encaminha. */
+  mediaRetry?: boolean;
 };
 
 export type MenuList = { text: string; listButton: string; choices: string[] };
@@ -260,6 +262,10 @@ export function readMenuStep(value: unknown): MenuStep | null {
 }
 
 type DecideInput = {
+  /** A pessoa mandou áudio/imagem/vídeo/documento sem legenda (o texto é só um rótulo). */
+  isMedia?: boolean;
+  /** A última mensagem do bot já foi um pedido de texto por causa de uma mídia. */
+  mediaRetry?: boolean;
   /** ID do item tocado na lista (ex.: "2"); tem prioridade sobre o texto. */
   choiceId?: string | null;
   /** menu_step da última mensagem enviada pelo bot nesta conversa (null = nunca houve). */
@@ -296,6 +302,46 @@ function closing({
   return { replies, nextStep: "done", handoff: true };
 }
 
+const MEDIA_PREFIX = "Só consigo ler mensagens de texto e as opções da lista.";
+const CONFIRM_REASK = "Toque em “Sim, está certo” para confirmar ou em “Corrigir” para escrever de novo.";
+
+/** A pergunta em curso, para repetir quando a pessoa manda mídia em vez de responder. */
+function repeatQuestion(step: MenuStep | null): { text: string; list?: MenuList } | null {
+  switch (step) {
+    case "menu":
+    case "menu_retry":
+      return {
+        text: "Indique por favor o número da opção que pretende: 1 apoio domiciliário, 2 formação, 3 candidatura, 4 outro assunto.",
+        list: {
+          text: "Para podermos ajudar, toque no botão e escolha a opção que pretende:",
+          listButton: "Ver opções",
+          choices: MENU_LIST_CHOICES
+        }
+      };
+    case "awaiting_1":
+      return { text: OPTION_REPLIES[1], list: WHO_LIST };
+    case "awaiting_1_type":
+      return { text: HELP_TEXT, list: HELP_LIST };
+    case "awaiting_1_urgency":
+      return { text: URGENCY_TEXT, list: URGENCY_LIST };
+    case "awaiting_1_zone":
+    case "awaiting_1_zone_retry":
+      return { text: ASK_ZONE };
+    case "awaiting_2":
+      return { text: OPTION_REPLIES[2], list: COURSE_LIST };
+    case "awaiting_3":
+      return { text: OPTION_REPLIES[3], list: EXPERIENCE_LIST };
+    case "awaiting_3_details":
+    case "awaiting_3_details_retry":
+      return { text: ASK_CANDIDATE_DETAILS };
+    case "awaiting_1_confirm":
+    case "awaiting_3_confirm":
+      return { text: CONFIRM_REASK, list: { text: CONFIRM_REASK, listButton: "Ver opções", choices: CONFIRM_ROWS } };
+    default:
+      return null;
+  }
+}
+
 /** Volta uma pergunta: a etapa anterior é repetida (ou o menu principal, se era a primeira). */
 function goBack(step: MenuStep | null): MenuDecision | null {
   switch (step) {
@@ -320,7 +366,35 @@ function goBack(step: MenuStep | null): MenuDecision | null {
   }
 }
 
-export function decideMenuReply({ lastStep, text, choiceId, night, recruitmentFormUrl }: DecideInput): MenuDecision {
+export function decideMenuReply({
+  lastStep,
+  text,
+  choiceId,
+  isMedia = false,
+  mediaRetry = false,
+  night,
+  recruitmentFormUrl
+}: DecideInput): MenuDecision {
+  // Áudio/imagem no meio do fluxo: a primeira vez pede texto ou opção e repete a pergunta;
+  // se insistir, a equipa assume.
+  if (isMedia) {
+    const question = repeatQuestion(lastStep);
+
+    if (question) {
+      if (mediaRetry) {
+        return closing({ night, choice: null });
+      }
+
+      return {
+        replies: [`${MEDIA_PREFIX} ${question.text}`],
+        nextStep: lastStep as MenuStep,
+        handoff: false,
+        mediaRetry: true,
+        ...(question.list ? { list: { ...question.list, text: `${MEDIA_PREFIX}\n${question.list.text}` } } : {})
+      };
+    }
+  }
+
   if (lastStep === "menu" || lastStep === "menu_retry") {
     const choice = (choiceId ? parseMenuChoice(choiceId) : null) ?? parseMenuChoice(text);
 

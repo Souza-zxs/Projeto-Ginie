@@ -6,8 +6,10 @@ import { Badge } from "@/components/badge";
 import { EmptyState } from "@/components/empty-state";
 import { PageHeader } from "@/components/page-header";
 import { getCurrentProfile } from "@/lib/auth/organization";
-import { formatDateTime } from "@/lib/datetime";
+import { formatDateTime, nowMs } from "@/lib/datetime";
 import { formatPhoneForDisplay } from "@/lib/phone";
+import { computeAwaitingSince, formatWaiting } from "@/services/uazapi/awaiting-team";
+import { loadConversationHistory } from "@/services/uazapi/history";
 import { createClient } from "@/lib/supabase/server";
 import { cn } from "@/lib/utils";
 import {
@@ -16,7 +18,6 @@ import {
   describeClientStatus,
   detectMenuTopic,
   extractMenuAnswers,
-  type MenuHistoryMessage,
   type MenuTopic
 } from "@/services/uazapi/menu-answers";
 
@@ -27,11 +28,8 @@ type ClientConversation = {
   contacts: { name: string | null; phone: string } | null;
 };
 
-type MessageRow = MenuHistoryMessage & { conversation_id: string };
-
 type SearchParams = { q?: string; topic?: string };
 
-const PAGE_SIZE = 1000;
 const MAX_CONVERSATIONS = 60;
 
 const TOPICS = Object.keys(TOPIC_LABELS) as MenuTopic[];
@@ -63,30 +61,12 @@ export default async function ClientsPage({ searchParams }: { searchParams: Prom
     .limit(MAX_CONVERSATIONS)
     .returns<ClientConversation[]>();
 
-  const messagesByConversation = new Map<string, MenuHistoryMessage[]>();
-  const ids = (conversations ?? []).map((conversation) => conversation.id);
-
-  // O PostgREST devolve no máximo ~1000 linhas por pedido; pagina até acabar.
-  for (let from = 0; ids.length && from < PAGE_SIZE * 5; from += PAGE_SIZE) {
-    const { data: page } = await supabase
-      .from("messages")
-      .select("conversation_id, direction, content, menu_step:payload->>menu_step")
-      .eq("organization_id", profile.organization_id)
-      .in("conversation_id", ids)
-      .order("created_at", { ascending: true })
-      .range(from, from + PAGE_SIZE - 1)
-      .returns<MessageRow[]>();
-
-    for (const row of page ?? []) {
-      const list = messagesByConversation.get(row.conversation_id) ?? [];
-      list.push(row);
-      messagesByConversation.set(row.conversation_id, list);
-    }
-
-    if ((page?.length ?? 0) < PAGE_SIZE) {
-      break;
-    }
-  }
+  const messagesByConversation = await loadConversationHistory(
+    supabase,
+    profile.organization_id,
+    (conversations ?? []).map((conversation) => conversation.id)
+  );
+  const renderedAt = nowMs();
 
   const clients = (conversations ?? [])
     .map((conversation) => {
@@ -96,7 +76,8 @@ export default async function ClientsPage({ searchParams }: { searchParams: Prom
         conversation,
         answers: extractMenuAnswers(history),
         topic: detectMenuTopic(history),
-        progress: detectMenuProgress(history)
+        progress: detectMenuProgress(history),
+        awaitingSince: computeAwaitingSince(history, !conversation.ai_enabled)
       };
     })
     .filter((client) => client.progress !== "no_menu")
@@ -147,7 +128,7 @@ export default async function ClientsPage({ searchParams }: { searchParams: Prom
 
       {clients.length ? (
         <div className="grid gap-4 lg:grid-cols-2">
-          {clients.map(({ conversation, answers, topic, progress }) => (
+          {clients.map(({ conversation, answers, topic, progress, awaitingSince }) => (
             <article key={conversation.id} className="rounded-lg border bg-card p-5 shadow-sm">
               <header className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
@@ -164,6 +145,11 @@ export default async function ClientsPage({ searchParams }: { searchParams: Prom
                   <Badge tone={describeClientStatus(progress, conversation.ai_enabled).tone}>
                     {describeClientStatus(progress, conversation.ai_enabled).label}
                   </Badge>
+                  {awaitingSince ? (
+                    <Badge tone={renderedAt - awaitingSince.getTime() >= 2 * 3_600_000 ? "danger" : "warning"}>
+                      Sem resposta há {formatWaiting(renderedAt - awaitingSince.getTime())}
+                    </Badge>
+                  ) : null}
                 </div>
               </header>
 
