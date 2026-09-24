@@ -46,6 +46,10 @@ export type MenuDecision = {
   mediaRetry?: boolean;
   /** Eliminatórias da candidatura respondidas "Não" até agora; vai no payload e volta na próxima resposta. */
   candidacyFails?: CandidacyKey[];
+  /** Saudação ou conversa de cortesia ("Boa tarde", "Tudo bem"): não conta como resposta errada. */
+  smallTalk?: boolean;
+  /** O bot desistiu por não entender (não foi a pessoa que pediu a equipa): um toque no menu retoma o fluxo. */
+  gaveUp?: boolean;
 };
 
 export type MenuList = { text: string; listButton: string; choices: string[] };
@@ -402,7 +406,7 @@ function decideCandidacy({
     }
 
     if (lastStep.endsWith("_retry")) {
-      return closing({ night, choice: null });
+      return closing({ night, choice: null, gaveUp: true });
     }
 
     return { replies: [textAgain(item)], nextStep: `${item.step}_retry` as MenuStep, handoff: false, candidacyFails: fails };
@@ -416,7 +420,7 @@ function decideCandidacy({
 
   if (!answer) {
     if (mediaRetry) {
-      return closing({ night, choice: null });
+      return closing({ night, choice: null, gaveUp: true });
     }
 
     const prompt = candidacyPrompt(index);
@@ -450,6 +454,93 @@ const ASK_ZONE_AGAIN = "Não consegui perceber a localidade. Escreva neste forma
 /** Resposta de texto livre válida: pelo menos duas letras seguidas (emoji, números ou pontuação não servem). */
 function hasWords(text: string) {
   return /\p{L}{2,}/u.test(text);
+}
+
+const SMALL_TALK_WORDS = new Set([
+  "ola", "oi", "hey", "hello", "hi", "boa", "bom", "bons", "dia", "dias", "tarde", "noite", "tudo", "bem", "bm", "td",
+  "e", "ai", "como", "esta", "estas", "vai", "voce", "obrigada", "obrigado", "ok", "okay", "por", "favor", "prazer",
+  "saudacoes", "boas"
+]);
+
+/** Só saudação/cortesia, sem pedido nenhum ("Olá", "Boa tarde", "Tudo bem?", "Olá, bom dia"). */
+export function isSmallTalk(text: string) {
+  const tokens = text
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .match(/\p{L}+/gu);
+
+  return Boolean(tokens && tokens.length <= 6 && tokens.every((token) => SMALL_TALK_WORDS.has(token)));
+}
+
+export type MenuIntent = 1 | 2 | 3;
+
+const TRAINING_WORDS = new Set([
+  "curso", "cursos", "formacao", "formacoes", "formar", "academia", "modulo", "modulos", "aula", "aulas", "geriatria"
+]);
+// "trabalho"/"trabalhar" sozinhos são ambíguos (colaboradoras falam do trabalho delas): só valem
+// com um verbo de querer ("quero trabalhar", "procuro trabalho") ou "trabalhar convosco".
+const RECRUITMENT_WORDS = new Set([
+  "emprego", "vaga", "vagas", "recrutamento", "curriculo", "cv", "oportunidade", "oportunidades", "contratar", "contratam", "contratacao"
+]);
+const WORK_WORDS = new Set(["trabalhar", "trabalho"]);
+const WANT_WORDS = new Set(["quero", "queria", "gostava", "gostaria", "procuro", "preciso", "busco", "interessada", "interessado", "disponivel"]);
+// Parentes ("mãe", "pai") sozinhos não bastam: podem ser uma desculpa a explicar uma falta.
+const SUPPORT_WORDS = new Set(["apoio", "cuidar", "cuidados"]);
+
+/**
+ * O que a pessoa escreveu em vez de tocar no menu, quando dá para saber com segurança:
+ * 1 apoio domiciliário, 2 formação, 3 candidatura. Se as palavras apontam para mais de um
+ * assunto (ex.: "apoio para a minha mãe fazer um curso"), não adivinha: devolve null.
+ * Quem procura trabalho e menciona "apoio domiciliário" ganha como candidatura.
+ */
+export function detectMenuIntent(text: string): MenuIntent | null {
+  const tokens =
+    text
+      .normalize("NFKD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .toLowerCase()
+      .match(/\p{L}+/gu) ?? [];
+
+  const training = tokens.some((token) => TRAINING_WORDS.has(token) || token.startsWith("inscri") || token.startsWith("certificad"));
+  const recruitment =
+    tokens.some((token) => RECRUITMENT_WORDS.has(token) || token.startsWith("candidat")) ||
+    (tokens.some((token) => WORK_WORDS.has(token)) && tokens.some((token) => WANT_WORDS.has(token) || token === "convosco" || token === "connosco"));
+  const support = tokens.some(
+    (token) => SUPPORT_WORDS.has(token) || token.startsWith("domicili") || token.startsWith("idos") || token.startsWith("acamad")
+  );
+
+  if (recruitment && training) return null;
+  if (recruitment) return 3;
+  if (training && support) return null;
+  if (training) return 2;
+  if (support) return 1;
+
+  return null;
+}
+
+const INTENT_ACK: Record<MenuIntent, string> = {
+  1: "Percebi que procura apoio domiciliário.",
+  2: "Percebi que procura formação.",
+  3: "Percebi que quer trabalhar connosco."
+};
+
+/** Segue direto para a opção que a pessoa descreveu; "voltar" leva ao menu se o bot entendeu mal. */
+function startOption(intent: MenuIntent): MenuDecision {
+  const ack = INTENT_ACK[intent];
+
+  if (intent === 3) {
+    return askCandidacy(0, [], ack);
+  }
+
+  const list = OPTION_LISTS[intent];
+
+  return {
+    replies: [`${ack} ${OPTION_REPLIES[intent]}`],
+    nextStep: `awaiting_${intent}` as MenuStep,
+    handoff: false,
+    list: { ...list, text: `${ack}\n${list.text}` }
+  };
 }
 
 function normalizeWord(text: string) {
@@ -596,12 +687,14 @@ function closing({
   night,
   choice,
   recruitmentFormUrl,
-  courseName
+  courseName,
+  gaveUp = false
 }: {
   night: boolean;
   choice: MenuChoice | null;
   recruitmentFormUrl?: string | null;
   courseName?: string | null;
+  gaveUp?: boolean;
 }): MenuDecision {
   const replies: string[] = [];
 
@@ -615,7 +708,7 @@ function closing({
 
   replies.push(night ? HANDOFF_NIGHT : HANDOFF_DAY);
 
-  return { replies, nextStep: "done", handoff: true };
+  return { replies, nextStep: "done", handoff: true, ...(gaveUp ? { gaveUp: true } : {}) };
 }
 
 const MEDIA_PREFIX = "Só consigo ler mensagens de texto e as opções da lista.";
@@ -714,7 +807,7 @@ export function decideMenuReply({
 
     if (question) {
       if (mediaRetry) {
-        return closing({ night, choice: null });
+        return closing({ night, choice: null, gaveUp: true });
       }
 
       return {
@@ -730,6 +823,30 @@ export function decideMenuReply({
 
   if (lastStep === "menu" || lastStep === "menu_retry") {
     const choice = (choiceId ? parseMenuChoice(choiceId) : null) ?? parseMenuChoice(text);
+
+    // Saudação ("Boa tarde") não é resposta errada: repete o menu sem gastar a nova tentativa.
+    if (!choice && isSmallTalk(text)) {
+      const again = repeatQuestion(lastStep);
+
+      if (again) {
+        return {
+          replies: [again.text],
+          nextStep: lastStep,
+          handoff: false,
+          smallTalk: true,
+          ...(again.list ? { list: again.list } : {})
+        };
+      }
+    }
+
+    // Escreveu o que quer ("quero saber os cursos"): vai direto à opção, sem gastar tentativa.
+    if (!choice) {
+      const intent = detectMenuIntent(text);
+
+      if (intent) {
+        return startOption(intent);
+      }
+    }
 
     if (choice === 4) {
       return closing({ night, choice });
@@ -752,7 +869,7 @@ export function decideMenuReply({
       return { replies: [`${MENU_RETRY_PREFIX}\n\n${MENU_WELCOME}`], nextStep: "menu_retry", handoff: false, list: menuList(MENU_RETRY_PREFIX) };
     }
 
-    return closing({ night, choice: null });
+    return closing({ night, choice: null, gaveUp: true });
   }
 
   if (isBack(choiceId, text)) {
@@ -792,7 +909,7 @@ export function decideMenuReply({
         ? confirmation("awaiting_1_confirm", text)
         : { replies: [ASK_ZONE_AGAIN], nextStep: "awaiting_1_zone_retry", handoff: false };
     case "awaiting_1_zone_retry":
-      return hasWords(text) ? confirmation("awaiting_1_confirm", text) : closing({ night, choice: 1 });
+      return hasWords(text) ? confirmation("awaiting_1_confirm", text) : closing({ night, choice: 1, gaveUp: true });
     case "awaiting_1_confirm":
       if (isYes(choiceId, text)) {
         return closing({ night, choice: 1 });

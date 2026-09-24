@@ -183,6 +183,23 @@ const RETRY_STEP_OF: Record<string, string> = {
   awaiting_3_hours: "awaiting_3_hours_retry"
 };
 
+// Mesma ideia de isSmallTalk em menu-bot.ts (módulos puros separados; menu-answers.test.mjs confere que coincidem).
+const SMALL_TALK_WORDS = new Set([
+  "ola", "oi", "hey", "hello", "hi", "boa", "bom", "bons", "dia", "dias", "tarde", "noite", "tudo", "bem", "bm", "td",
+  "e", "ai", "como", "esta", "estas", "vai", "voce", "obrigada", "obrigado", "ok", "okay", "por", "favor", "prazer",
+  "saudacoes", "boas"
+]);
+
+export function isSmallTalkText(text: string) {
+  const tokens = text
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .match(/\p{L}+/gu);
+
+  return Boolean(tokens && tokens.length <= 6 && tokens.every((token) => SMALL_TALK_WORDS.has(token)));
+}
+
 function nextBotStep(messages: MenuHistoryMessage[], position: number) {
   return messages.slice(position + 1).find((item) => item.direction === "outbound" && item.menu_step)?.menu_step ?? null;
 }
@@ -243,6 +260,11 @@ function walkMenu(messages: MenuHistoryMessage[]): { answers: MenuAnswer[]; afte
     }
 
     const question = pendingStep ? QUESTION_BY_STEP[pendingStep] : null;
+
+    // Saudação diante do menu ("Boa tarde", "Tudo bem") não é a escolha da opção.
+    if ((pendingStep === "menu" || pendingStep === "menu_retry") && isSmallTalkText(text)) {
+      continue;
+    }
 
     if (question && text && pendingStep && DISCARDED_BY_BACK[pendingStep] && isBackAnswer(text)) {
       truncateFrom(answers, DISCARDED_BY_BACK[pendingStep]);

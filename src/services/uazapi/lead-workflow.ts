@@ -105,12 +105,31 @@ export async function processUazapiLeadMessage({
     payload
   });
 
+  // O bot desistiu sozinho (não entendeu a pessoa) e ninguém da equipa respondeu: se ela toca numa
+  // opção do menu (as listas continuam no chat), é sinal de que quer o menu. Retoma nessa escolha.
+  let resumeByTap = false;
+
+  if (!conversation.ai_enabled && choiceId && /^[1-4]$/.test(choiceId)) {
+    const { data: lastOutboundAny } = await supabase
+      .from("messages")
+      .select("payload")
+      .eq("conversation_id", conversation.id)
+      .eq("direction", "outbound")
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle<{ payload: Record<string, unknown> | null }>();
+
+    resumeByTap = lastOutboundAny?.payload?.gave_up === true;
+  }
+
   // Bot pausado (equipa respondeu ou já encaminhou): volta se a conversa ficou 24h em
   // silêncio. Cada mensagem da equipa reinicia essa contagem. Ao voltar, recomeça pelo menu.
-  const resumeBot = shouldResumeBot({
-    botActive: conversation.ai_enabled,
-    lastMessageAt: previousMessage?.created_at
-  });
+  const resumeBot =
+    resumeByTap ||
+    shouldResumeBot({
+      botActive: conversation.ai_enabled,
+      lastMessageAt: previousMessage?.created_at
+    });
 
   // A mensagem que chegou sobe a conversa na lista do Inbox, mesmo com o bot pausado.
   await supabase
@@ -136,7 +155,8 @@ export async function processUazapiLeadMessage({
       choiceId,
       isMedia: Boolean(mediaType),
       instance,
-      restart: resumeBot
+      restart: resumeBot && !resumeByTap,
+      forceMenuStep: resumeByTap
     });
   }
 
@@ -289,7 +309,8 @@ async function runMenuBot({
   choiceId,
   isMedia = false,
   instance,
-  restart = false
+  restart = false,
+  forceMenuStep = false
 }: {
   supabase: SupabaseClient;
   organizationId: string;
@@ -302,11 +323,13 @@ async function runMenuBot({
   instance?: UazapiInstanceRef;
   /** O bot acabou de ser retomado: ignora a etapa antiga e começa pelo menu. */
   restart?: boolean;
+  /** O bot desistiu antes e a pessoa tocou no menu: trata a mensagem como resposta ao menu. */
+  forceMenuStep?: boolean;
 }) {
   // O estado do menu vive no payload da última mensagem que o bot enviou.
   const { data: lastOutbound } = await supabase
     .from("messages")
-    .select("payload")
+    .select("payload, created_at")
     .eq("organization_id", organizationId)
     .eq("conversation_id", conversationId)
     .eq("direction", "outbound")
@@ -314,10 +337,10 @@ async function runMenuBot({
     .not("payload->>menu_step", "is", null)
     .order("created_at", { ascending: false })
     .limit(1)
-    .maybeSingle<{ payload: Record<string, unknown> | null }>();
+    .maybeSingle<{ payload: Record<string, unknown> | null; created_at: string }>();
 
   const decision = decideMenuReply({
-    lastStep: restart ? null : readMenuStep(lastOutbound?.payload?.menu_step),
+    lastStep: forceMenuStep ? "menu" : restart ? null : readMenuStep(lastOutbound?.payload?.menu_step),
     text,
     choiceId,
     isMedia,
@@ -326,6 +349,16 @@ async function runMenuBot({
     candidacyFails: restart ? [] : (Array.isArray(lastOutbound?.payload?.candidacy_fails) ? (lastOutbound?.payload?.candidacy_fails as string[]) : []),
     recruitmentFormUrl: process.env.RECRUITMENT_FORM_URL || DEFAULT_RECRUITMENT_FORM_URL
   });
+
+  // Saudação logo depois do menu: ele ainda está na tela dela. Não manda outro nem conta como erro.
+  if (
+    decision.smallTalk &&
+    lastOutbound?.created_at &&
+    Date.now() - new Date(lastOutbound.created_at).getTime() < 60_000
+  ) {
+    return { processed: true, ai: false, menu: "small_talk_ignored", conversationId };
+  }
+
   const uazapiConfig = await getUazapiIntegrationConfig(supabase, organizationId, instance);
 
   const integrationConfig = {
@@ -370,6 +403,7 @@ async function runMenuBot({
           sent_as: sentAs,
           media_retry: decision.mediaRetry === true,
           ...(decision.candidacyFails ? { candidacy_fails: decision.candidacyFails } : {}),
+          ...(decision.gaveUp ? { gave_up: true } : {}),
           result
         }
       });

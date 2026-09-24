@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { CANDIDACY, MENU_CHOICE_ROWS } from "./menu-bot.ts";
-import { describeClientStatus, detectMenuProgress, detectMenuTopic, displayAnswer, extractMenuAnswers, splitMenuRequests } from "./menu-answers.ts";
+import { CANDIDACY, MENU_CHOICE_ROWS, isSmallTalk } from "./menu-bot.ts";
+import { describeClientStatus, detectMenuProgress, detectMenuTopic, displayAnswer, extractMenuAnswers, isSmallTalkText, splitMenuRequests } from "./menu-answers.ts";
 
 const bot = (step, content = "pergunta") => ({ direction: "outbound", content, menu_step: step });
 const client = (content) => ({ direction: "inbound", content, menu_step: null });
@@ -425,4 +425,22 @@ test("localidade entre parênteses aparece sem eles, também quando escrita de n
   ];
 
   assert.deepEqual(extractMenuAnswers(messages), [{ question: "Localidade", answer: "Porto" }]);
+});
+
+test("saudações diante do menu não viram a 'opção do menu' (caso real: Olá, Boa tarde, Tudo Bm, depois Candidatura)", () => {
+  const messages = [
+    client("Olá"), bot("menu"),
+    client("Boa tarde"), client("Tudo Bm"),
+    client("Candidatura"), bot("awaiting_3_name")
+  ];
+
+  assert.deepEqual(extractMenuAnswers(messages), [{ question: "Opção do menu", answer: "Candidatura" }]);
+});
+
+test("o reconhecimento de saudação é o mesmo no bot e nas respostas", () => {
+  const corpus = ["Olá", "Boa tarde", "Tudo Bm", "Bom dia, tudo bem?", "oi", "Obrigada", "Quero apoio para a minha mãe", "Boa tarde, quero os cursos", "1", "sim", "", "👍"];
+
+  for (const text of corpus) {
+    assert.equal(isSmallTalkText(text), isSmallTalk(text), text);
+  }
 });

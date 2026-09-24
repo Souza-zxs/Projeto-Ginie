@@ -8,6 +8,8 @@ import {
   DEFAULT_RECRUITMENT_FORM_URL,
   OPTION_REPLIES,
   decideMenuReply,
+  detectMenuIntent,
+  isSmallTalk,
   parseMenuChoice,
   readMenuStep
 } from "./menu-bot.ts";
@@ -421,7 +423,7 @@ test("sim/não digitados são entendidos; resposta confusa repete uma vez e depo
 
   const twice = decideMenuReply({ lastStep: "awaiting_3_q2", text: "sei lá", mediaRetry: true, night: false });
 
-  assert.deepEqual(twice, { replies: [HANDOFF_DAY], nextStep: "done", handoff: true });
+  assert.deepEqual(twice, { replies: [HANDOFF_DAY], nextStep: "done", handoff: true, gaveUp: true });
 });
 
 test("disponibilidade: lista ou texto livre; nome e horário aceitam texto e pedem de novo se vier sem palavras", () => {
@@ -593,8 +595,8 @@ test("insistir com mídia depois do pedido encaminha para a equipa", () => {
   const day = decideMenuReply({ lastStep: "awaiting_1_type", text: "[áudio]", isMedia: true, mediaRetry: true, night: false });
   const night = decideMenuReply({ lastStep: "awaiting_1_zone", text: "[imagem]", isMedia: true, mediaRetry: true, night: true });
 
-  assert.deepEqual(day, { replies: [HANDOFF_DAY], nextStep: "done", handoff: true });
-  assert.deepEqual(night, { replies: [HANDOFF_NIGHT], nextStep: "done", handoff: true });
+  assert.deepEqual(day, { replies: [HANDOFF_DAY], nextStep: "done", handoff: true, gaveUp: true });
+  assert.deepEqual(night, { replies: [HANDOFF_NIGHT], nextStep: "done", handoff: true, gaveUp: true });
 });
 
 test("mídia como primeira mensagem abre o menu normalmente; texto depois do pedido segue o fluxo", () => {
@@ -652,4 +654,156 @@ test("a confirmação da localidade mostra o local sem os parênteses do formato
   assert.equal(confirm.nextStep, "awaiting_1_confirm");
   assert.match(confirm.replies[0], /«Benfica, Lisboa»/);
   assert.doesNotMatch(confirm.replies[0], /«\(/);
+});
+
+const SMALL_TALK = ["Olá", "Boa tarde", "Tudo Bm", "Bom dia, tudo bem?", "oi", "Olá, boa noite!", "tudo bem", "Obrigada", "ok", "Olá bom dia tudo bem"];
+const NOT_SMALL_TALK = ["Quero apoio para a minha mãe", "Boa tarde, quero saber os cursos", "1", "sim", "preço?", "", "👍", "Olá, preciso de ajuda com a medicação"];
+
+test("saudação é reconhecida; pedido de verdade não é", () => {
+  for (const text of SMALL_TALK) {
+    assert.equal(isSmallTalk(text), true, text);
+  }
+
+  for (const text of NOT_SMALL_TALK) {
+    assert.equal(isSmallTalk(text), false, text);
+  }
+});
+
+test("caso real: 'Olá', 'Boa tarde', 'Tudo Bm' seguidos não gastam tentativa nem encaminham", () => {
+  const first = decideMenuReply({ lastStep: null, text: "Olá", night: false });
+
+  assert.equal(first.nextStep, "menu");
+
+  let state = first.nextStep;
+
+  for (const text of ["Boa tarde", "Tudo Bm", "Olá"]) {
+    const decision = decideMenuReply({ lastStep: state, text, night: false });
+
+    assert.equal(decision.smallTalk, true, text);
+    assert.equal(decision.handoff, false, text);
+    assert.equal(decision.nextStep, "menu", text); // continua no menu, sem passar para "menu_retry"
+    assert.ok(decision.list, "repete o menu para o caso de ele não estar na tela");
+    assert.doesNotMatch(decision.replies[0], /Desculpe, não consegui perceber/);
+    state = decision.nextStep;
+  }
+
+  // Depois das saudações, tocar numa opção funciona normalmente.
+  assert.equal(decideMenuReply({ lastStep: state, text: "Candidatura", choiceId: "3", night: false }).nextStep, "awaiting_3_name");
+});
+
+test("saudação também não gasta a nova tentativa depois de uma resposta errada", () => {
+  const retry = decideMenuReply({ lastStep: "menu", text: "quero saber preços", night: false });
+
+  assert.equal(retry.nextStep, "menu_retry");
+
+  const greeting = decideMenuReply({ lastStep: "menu_retry", text: "Boa tarde", night: false });
+
+  assert.equal(greeting.nextStep, "menu_retry");
+  assert.equal(greeting.handoff, false);
+
+  // Mas uma segunda resposta errada de verdade continua a passar para a equipa.
+  const invalid = decideMenuReply({ lastStep: "menu_retry", text: "quero saber preços", night: false });
+
+  assert.equal(invalid.handoff, true);
+});
+
+test("desistência do bot é marcada (gaveUp); pedido explícito da equipa e recusa não são", () => {
+  const gaveUp = [
+    decideMenuReply({ lastStep: "menu_retry", text: "não sei", night: false }),
+    decideMenuReply({ lastStep: "awaiting_1_type", text: "[áudio]", isMedia: true, mediaRetry: true, night: false }),
+    decideMenuReply({ lastStep: "awaiting_3_q2", text: "sei lá", mediaRetry: true, night: false }),
+    decideMenuReply({ lastStep: "awaiting_3_name_retry", text: "😀", night: false }),
+    decideMenuReply({ lastStep: "awaiting_1_zone_retry", text: "👍", night: false })
+  ];
+
+  for (const decision of gaveUp) {
+    assert.equal(decision.handoff, true);
+    assert.equal(decision.gaveUp, true);
+  }
+
+  const asked = [
+    decideMenuReply({ lastStep: "menu", text: "4", night: false }),
+    decideMenuReply({ lastStep: "awaiting_1", text: "Outro", choiceId: "other", night: false }),
+    decideMenuReply({ lastStep: "awaiting_1_confirm", text: "sim", night: false })
+  ];
+
+  for (const decision of asked) {
+    assert.equal(decision.handoff, true);
+    assert.equal(decision.gaveUp, undefined);
+  }
+});
+
+test("palavras-chave levam à opção certa (formação, candidatura, apoio)", () => {
+  const cases = {
+    2: ["Quero saber os cursos", "a minha mãe quer fazer um curso", "Boa tarde, gostava de saber sobre a formação", "vocês têm formação em geriatria?", "quero inscrever-me num curso", "informações sobre a academia"],
+    3: ["Quero trabalhar convosco", "procuro emprego", "Há vagas?", "gostaria de me candidatar", "envio o meu currículo?", "quero trabalhar com apoio domiciliário"],
+    1: ["Preciso de apoio domiciliário para a minha mãe", "quero uma pessoa para cuidar do meu pai", "tenho uma avó idosa", "a minha tia está acamada", "apoio doméstico", "queria saber sobre cuidados para o meu tio"]
+  };
+
+  for (const [intent, texts] of Object.entries(cases)) {
+    for (const text of texts) {
+      assert.equal(detectMenuIntent(text), Number(intent), text);
+    }
+  }
+});
+
+test("quando as palavras apontam para mais de um assunto (ou nenhum), não adivinha", () => {
+  for (const text of [
+    "apoio para a minha mãe e um curso para mim",
+    "quero um curso para trabalhar",
+    "Quero saber os preços",
+    "Não irei conseguir ir para o trabalho",
+    "Sim vou fazer um trabalho até às 9 da noite",
+    "Da manhã já tenho um lugar para trabalhar",
+    "a minha mãe está doente",
+    "o meu pai não pode",
+    "ajuda",
+    "sim",
+    "olá",
+    "Boa tarde",
+    "sou cuidadora",
+    "",
+    "👍"
+  ]) {
+    assert.equal(detectMenuIntent(text), null, text);
+  }
+});
+
+test("no menu, escrever o que quer vai direto à opção, avisando o que entendeu", () => {
+  for (const lastStep of ["menu", "menu_retry"]) {
+    const training = decideMenuReply({ lastStep, text: "Boa tarde, quero saber os cursos", night: false });
+
+    assert.equal(training.nextStep, "awaiting_2", lastStep);
+    assert.equal(training.handoff, false);
+    assert.match(training.replies[0], /^Percebi que procura formação\./);
+    assert.match(training.list.text, /^Percebi que procura formação\./);
+    assert.ok(training.list.choices.some((row) => row.includes("|c1|")));
+  }
+
+  const support = decideMenuReply({ lastStep: "menu", text: "preciso de apoio para a minha mãe", night: false });
+
+  assert.equal(support.nextStep, "awaiting_1");
+  assert.match(support.replies[0], /Percebi que procura apoio domiciliário/);
+  assert.ok(support.list.choices.some((row) => row.includes("|w1|")));
+
+  const candidacy = decideMenuReply({ lastStep: "menu", text: "procuro emprego", night: false });
+
+  assert.equal(candidacy.nextStep, "awaiting_3_name");
+  assert.match(candidacy.replies[0], /Percebi que quer trabalhar connosco\./);
+  assert.match(candidacy.replies[0], /nome completo/);
+});
+
+test("se o bot entendeu mal, 'voltar' devolve ao menu; número e saudação continuam com prioridade", () => {
+  const routed = decideMenuReply({ lastStep: "menu", text: "quero saber os cursos", night: false });
+  const back = decideMenuReply({ lastStep: routed.nextStep, text: "voltar", night: false });
+
+  assert.equal(back.nextStep, "menu");
+
+  // Um número tocado ou digitado vale mais que qualquer palavra.
+  assert.equal(decideMenuReply({ lastStep: "menu", text: "1", night: false }).nextStep, "awaiting_1");
+  assert.equal(decideMenuReply({ lastStep: "menu", text: "Candidatura", choiceId: "3", night: false }).nextStep, "awaiting_3_name");
+
+  // Saudação pura continua a não gastar tentativa; texto sem palavra-chave continua a ser resposta errada.
+  assert.equal(decideMenuReply({ lastStep: "menu", text: "Boa tarde", night: false }).smallTalk, true);
+  assert.equal(decideMenuReply({ lastStep: "menu", text: "quero saber preços", night: false }).nextStep, "menu_retry");
 });
