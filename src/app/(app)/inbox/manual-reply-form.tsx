@@ -36,7 +36,7 @@ export function ManualReplyForm({ conversationId }: { conversationId: string }) 
           {pending ? "A enviar…" : "Enviar"}
         </button>
       </div>
-      <p className="mt-2 text-xs text-muted-foreground">Ao enviar, o bot fica pausado nesta conversa e só volta se a pessoa escrever depois de 24 horas sem mensagens. Para voltar antes, use “Ativar bot”.</p>
+      <p className="mt-2 text-xs text-muted-foreground">Ao enviar, o bot fica pausado nesta conversa até você ativá-lo de novo (botão “Ativar bot”).</p>
       <p aria-live="polite" className="mt-1 text-sm">
         {state && "error" in state ? <span className="text-red-700">{state.error}</span> : null}
       </p>

@@ -105,30 +105,33 @@ export async function processUazapiLeadMessage({
     payload
   });
 
+  // Última mensagem enviada (bot ou pessoa), para duas coisas: saber se dá para retomar sozinho
+  // (só quando quem pausou foi o bot, nunca quando foi uma pessoa) e, tocando numa opção do menu
+  // depois de o bot ter desistido sozinho, retomar nessa escolha.
+  const { data: lastOutboundAny } = await supabase
+    .from("messages")
+    .select("payload")
+    .eq("conversation_id", conversation.id)
+    .eq("direction", "outbound")
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle<{ payload: Record<string, unknown> | null }>();
+  const lastOutboundWasBot = Boolean(lastOutboundAny?.payload?.menu_step);
+
   // O bot desistiu sozinho (não entendeu a pessoa) e ninguém da equipa respondeu: se ela toca numa
   // opção do menu (as listas continuam no chat), é sinal de que quer o menu. Retoma nessa escolha.
-  let resumeByTap = false;
+  const resumeByTap = Boolean(
+    !conversation.ai_enabled && choiceId && /^[1-4]$/.test(choiceId) && lastOutboundAny?.payload?.gave_up === true
+  );
 
-  if (!conversation.ai_enabled && choiceId && /^[1-4]$/.test(choiceId)) {
-    const { data: lastOutboundAny } = await supabase
-      .from("messages")
-      .select("payload")
-      .eq("conversation_id", conversation.id)
-      .eq("direction", "outbound")
-      .order("created_at", { ascending: false })
-      .limit(1)
-      .maybeSingle<{ payload: Record<string, unknown> | null }>();
-
-    resumeByTap = lastOutboundAny?.payload?.gave_up === true;
-  }
-
-  // Bot pausado (equipa respondeu ou já encaminhou): volta se a conversa ficou 24h em
-  // silêncio. Cada mensagem da equipa reinicia essa contagem. Ao voltar, recomeça pelo menu.
+  // Bot pausado por ele mesmo (desistiu ou já encaminhou, sem a equipa ter respondido): volta se
+  // a conversa ficou 24h em silêncio. Pausado por uma pessoa: fica assim até "Ativar bot".
   const resumeBot =
     resumeByTap ||
     shouldResumeBot({
       botActive: conversation.ai_enabled,
-      lastMessageAt: previousMessage?.created_at
+      lastMessageAt: previousMessage?.created_at,
+      lastOutboundWasBot
     });
 
   // A mensagem que chegou sobe a conversa na lista do Inbox, mesmo com o bot pausado.
