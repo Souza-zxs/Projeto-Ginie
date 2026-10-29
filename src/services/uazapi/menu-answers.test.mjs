@@ -444,3 +444,69 @@ test("o reconhecimento de saudação é o mesmo no bot e nas respostas", () => {
     assert.equal(isSmallTalkText(text), isSmallTalk(text), text);
   }
 });
+
+// ---- Formato novo (agente conversacional livre): a mensagem do bot já traz a resposta pronta.
+const botFree = (step, extra = {}) => ({ direction: "outbound", content: "pergunta", menu_step: step, ...extra });
+
+test("agente livre: usa collected_info pronto em vez de reconstruir pergunta a pergunta", () => {
+  const messages = [
+    client("Olá, quero apoio para a minha mãe"),
+    botFree("in_progress", {
+      topic: "support",
+      collected_info: [
+        { question: "Para quem", answer: "A minha mãe" },
+        { question: "Localidade", answer: "Benfica, Lisboa" }
+      ]
+    })
+  ];
+
+  assert.deepEqual(extractMenuAnswers(messages), [
+    { question: "Para quem", answer: "A minha mãe" },
+    { question: "Localidade", answer: "Benfica, Lisboa" }
+  ]);
+  assert.equal(detectMenuTopic(messages), "support");
+});
+
+test("agente livre: topic/collected_info/decline_reason vêm sempre da ÚLTIMA mensagem do bot no segmento", () => {
+  const messages = [
+    botFree("menu"),
+    client("quero formação"),
+    botFree("in_progress", { topic: "training", collected_info: [{ question: "Curso", answer: "Geriatria" }] }),
+    client("afinal quero candidatar-me"),
+    botFree("in_progress", { topic: "recruitment", collected_info: [{ question: "Nome", answer: "Ana" }] })
+  ];
+
+  assert.equal(detectMenuTopic(messages), "recruitment");
+  assert.deepEqual(extractMenuAnswers(messages), [{ question: "Nome", answer: "Ana" }]);
+});
+
+test("agente livre: recusa usa decline_reason pronto, sem varrer o texto das respostas", () => {
+  const messages = [
+    botFree("menu"),
+    client("quero candidatar-me"),
+    botFree("declined", { topic: "recruitment", decline_reason: "sem autorização de trabalho", collected_info: [{ question: "Nome", answer: "Ana" }] })
+  ];
+  const [request] = splitMenuRequests(messages);
+
+  assert.equal(request.progress, "declined");
+  assert.equal(request.declineReason, "sem autorização de trabalho");
+  assert.equal(request.topic, "recruitment");
+});
+
+test("conversa sem nenhum campo novo continua a usar a reconstrução antiga (compatibilidade)", () => {
+  // Mesma mensagem, sem os campos novos: cai no caminho de sempre (walkMenu), sem diferença.
+  const messages = [bot("awaiting_1_zone"), client("Lisboa")];
+
+  assert.deepEqual(extractMenuAnswers(messages), [{ question: "Localidade", answer: "Lisboa" }]);
+});
+
+test("numa conversa que troca de formato (ex.: mudança de modo a meio), vale sempre o mais recente", () => {
+  const messages = [
+    bot("awaiting_1"), // mensagem do menu antigo, sem collected_info
+    client("Pai ou mãe"),
+    botFree("in_progress", { topic: "support", collected_info: [{ question: "Para quem", answer: "Pai ou mãe" }] })
+  ];
+
+  // A última mensagem do bot já é do agente livre: prevalece o collected_info dela.
+  assert.deepEqual(extractMenuAnswers(messages), [{ question: "Para quem", answer: "Pai ou mãe" }]);
+});

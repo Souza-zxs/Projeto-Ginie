@@ -1,6 +1,7 @@
 // Chamadas de gestão da instância na Uazapi (conectar, status, desconectar, webhook).
 // Rodam só no servidor: o token da instância nunca deve chegar ao navegador.
 import { parseUazapiConnection } from "@/services/uazapi/connection-state";
+import { hasUazapiChatHistory } from "@/services/uazapi/chat-history-shape";
 
 export type UazapiCredentials = { baseUrl: string; token: string };
 
@@ -39,6 +40,18 @@ export async function connectUazapiInstance(credentials: UazapiCredentials, phon
 
 export async function disconnectUazapiInstance(credentials: UazapiCredentials) {
   await callUazapi(credentials, "POST", "/instance/disconnect", {});
+}
+
+/**
+ * Procura mensagens já trocadas com um contacto (antes de o bot falar pela primeira vez),
+ * usado para não assumir uma conversa que já existia antes deste sistema. O formato exato da
+ * resposta não está documentado publicamente — a leitura tolerante fica em
+ * chat-history-shape.ts (pura, testada ali); formato inesperado conta como "sem histórico".
+ */
+export async function findUazapiChatHistory(credentials: UazapiCredentials, chatId: string) {
+  const payload = await callUazapi(credentials, "POST", "/message/find", { chatid: chatId, limit: 1 });
+
+  return { hasHistory: hasUazapiChatHistory(payload), raw: payload };
 }
 
 /**

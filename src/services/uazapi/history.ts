@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import type { MenuTopic } from "@/services/uazapi/menu-answers";
 
 const PAGE_SIZE = 1000;
 const MAX_PAGES = 5;
@@ -9,6 +10,10 @@ export type ConversationHistoryRow = {
   content: string | null;
   menu_step: string | null;
   created_at: string;
+  /** Só o agente conversacional livre preenche estes três (ver menu-answers.ts). */
+  collected_info: { question: string; answer: string }[] | null;
+  topic: MenuTopic | null;
+  decline_reason: string | null;
 };
 
 /**
@@ -33,7 +38,9 @@ export async function loadConversationHistory(
   for (let page = 0; page < MAX_PAGES; page += 1) {
     let query = supabase
       .from("messages")
-      .select("conversation_id, direction, content, created_at, menu_step:payload->>menu_step")
+      .select(
+        "conversation_id, direction, content, created_at, menu_step:payload->>menu_step, collected_info:payload->collected_info, topic:payload->>topic, decline_reason:payload->>decline_reason"
+      )
       .eq("organization_id", organizationId)
       .in("conversation_id", conversationIds);
 

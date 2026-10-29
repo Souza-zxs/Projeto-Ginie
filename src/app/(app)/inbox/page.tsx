@@ -20,7 +20,8 @@ import { createClient } from "@/lib/supabase/server";
 import {
   TOPIC_LABELS,
   describeClientStatus,
-  splitMenuRequests
+  splitMenuRequests,
+  type MenuTopic
 } from "@/services/uazapi/menu-answers";
 import { computeAwaitingSince, formatWaiting } from "@/services/uazapi/awaiting-team";
 import { loadConversationHistory } from "@/services/uazapi/history";
@@ -55,6 +56,10 @@ type MessageRow = {
   created_at: string;
   menu_step: string | null;
   send_error: string | null;
+  /** Só o agente conversacional livre preenche estes três (ver menu-answers.ts). */
+  collected_info: { question: string; answer: string }[] | null;
+  topic: MenuTopic | null;
+  decline_reason: string | null;
 };
 
 type SearchParams = {
@@ -162,7 +167,9 @@ export default async function InboxPage({
   const { data: messages } = activeConversation
     ? await supabase
         .from("messages")
-        .select("id, direction, type, content, media_url, status, created_at, menu_step:payload->>menu_step, send_error:payload->>send_error")
+        .select(
+          "id, direction, type, content, media_url, status, created_at, menu_step:payload->>menu_step, send_error:payload->>send_error, collected_info:payload->collected_info, topic:payload->>topic, decline_reason:payload->>decline_reason"
+        )
         .eq("organization_id", profile.organization_id)
         .eq("conversation_id", activeConversation.id)
         .order("created_at", { ascending: true })

@@ -1,5 +1,4 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { runLeadAgent } from "@/agents/lead-agent";
 import { normalizePhone } from "@/lib/phone";
 import {
   configString,
@@ -8,11 +7,26 @@ import {
   getUazapiIntegrationRow,
   type UazapiInstanceRef
 } from "@/services/integrations/config";
-import { getKnownLeadFacts, upsertLeadFromQualification } from "@/services/leads/workflow";
 import { isNightTime } from "@/lib/service-hours";
 import { shouldResumeBot } from "@/services/uazapi/bot-resume";
+import { hasRecentWhatsappHistory } from "@/services/uazapi/new-contact-check";
 import { DEFAULT_RECRUITMENT_FORM_URL, decideMenuReply, readMenuStep, withTapHint } from "@/services/uazapi/menu-bot";
+import { TOPIC_LABELS, type MenuAnswer } from "@/services/uazapi/menu-answers";
 import { sendUazapiList, sendUazapiMessage } from "@/services/uazapi/send-message";
+import {
+  ageAnswer as recognizeAge,
+  yesNoAnswer as recognizeYesNo
+} from "@/agents/candidacy-answer-recognizers";
+import {
+  ELIGIBILITY_ORDER,
+  decideCandidacyOutcome,
+  declineReasonLabel,
+  mergeCandidacyFacts,
+  type CandidacyFacts,
+  type CandidacyKey
+} from "@/agents/candidacy-eligibility";
+import { runWhatsappAgent, type WhatsappTopic } from "@/agents/whatsapp-agent";
+import type { KnownLeadFacts } from "@/agents/known-facts";
 
 type AgentConfig = {
   id: string;
@@ -67,7 +81,11 @@ export async function processUazapiLeadMessage({
     phone: normalizedPhone,
     payload,
     senderName,
-    hauzappClienteId
+    hauzappClienteId,
+    // Só aqui (entrada automática): se a conversa for mesmo nova, confere se já havia
+    // histórico real no WhatsApp antes de o bot assumir. Na pausa manual (pauseBotForHumanMessage)
+    // não faz sentido — a conversa já fica pausada de qualquer forma.
+    checkHistoryWith: instance
   });
 
   // Marca por qual linha esta conversa está a falar agora: a resposta manual pelo Inbox
@@ -147,7 +165,11 @@ export async function processUazapiLeadMessage({
     return { processed: true, ai: false, conversationId: conversation.id };
   }
 
-  if (process.env.UAZAPI_MENU_BOT !== "off") {
+  // "menu" (padrão) usa o bot por botões, sem mudança; "free" usa o novo bot conversacional
+  // livre. Dá para reverter em produção sem deploy, só trocando a variável de ambiente.
+  const botMode = process.env.UAZAPI_BOT_MODE === "free" ? "free" : "menu";
+
+  if (botMode === "menu") {
     return runMenuBot({
       supabase,
       organizationId,
@@ -163,80 +185,18 @@ export async function processUazapiLeadMessage({
     });
   }
 
-  const agent = await getUazapiLeadAgent(supabase, organizationId, instance);
-  // Ordem decrescente + limit traz as 30 mais RECENTES; depois volta à ordem cronológica.
-  // Em ordem crescente viriam as 30 mais antigas e, numa conversa longa, o agente não
-  // veria a mensagem que acabou de chegar.
-  const { data: recentMessages } = await supabase
-    .from("messages")
-    .select("direction, content")
-    .eq("organization_id", organizationId)
-    .eq("conversation_id", conversation.id)
-    .order("created_at", { ascending: false })
-    .limit(30)
-    .returns<Array<{ direction: "inbound" | "outbound"; content: string | null }>>();
-  const messages = [...(recentMessages ?? [])].reverse();
-  const known = await getKnownLeadFacts(supabase, organizationId, conversation.id);
-
-  const qualification = await runLeadAgent({
-    contact: {
-      name: contact.name,
-      phone: normalizedPhone
-    },
-    known,
-    campaign: {
-      property_description:
-        "Pessoa que contactou a DAR+ pelo WhatsApp. Percebe a necessidade, qualifica e, quando fizer sentido, conduz para o passo seguinte.",
-      // O prompt do agente já vai no system (runLeadAgent). Repeti-lo aqui dobrava o
-      // tamanho e empurrava a conversa para fora da janela de contexto do modelo local.
-      agent_prompt: null
-    },
-    agent,
-    messages
-  });
-
-  const lead = await upsertLeadFromQualification({
+  return runFreeAgentBot({
     supabase,
     organizationId,
-    contactId: contact.id,
-    campaignId: null,
     conversationId: conversation.id,
-    qualification,
-    source: "hauzapp"
-  });
-  const uazapiConfig = await getUazapiIntegrationConfig(supabase, organizationId, instance);
-  const result = await sendUazapiMessage({
+    contactId: contact.id,
+    contactName: contact.name,
     phone: normalizedPhone,
-    text: qualification.reply,
-    integrationConfig: {
-      baseUrl: configString(uazapiConfig, ["baseUrl", "base_url"], process.env.UAZAPI_BASE_URL) ?? undefined,
-      token: configString(uazapiConfig, ["token", "apiKey", "api_key"], process.env.UAZAPI_TOKEN) ?? undefined
-    }
+    text,
+    isMedia: Boolean(mediaType),
+    instance,
+    restart: resumeBot
   });
-  const sentAt = new Date().toISOString();
-
-  await Promise.all([
-    supabase.from("messages").insert({
-      organization_id: organizationId,
-      conversation_id: conversation.id,
-      contact_id: contact.id,
-      direction: "outbound",
-      channel: "uazapi",
-      type: "text",
-      content: qualification.reply,
-      status: "sent",
-      payload: result
-    }),
-    supabase
-      .from("conversations")
-      .update({
-        current_stage: qualification.stage,
-        last_message_at: sentAt
-      })
-      .eq("id", conversation.id)
-  ]);
-
-  return { processed: true, ai: true, leadId: lead.id, conversationId: conversation.id };
 }
 
 type HumanMessageInput = {
@@ -459,6 +419,337 @@ async function runMenuBot({
   return { processed: true, ai: false, menu: decision.nextStep, conversationId };
 }
 
+type FreeAgentStep = "menu" | "in_progress" | "declined" | "done";
+
+type FreeAgentState = {
+  topic: WhatsappTopic | null;
+  support: KnownLeadFacts;
+  candidateName: string | null;
+  eligibility: CandidacyFacts;
+  unclearCount: number;
+};
+
+const EMPTY_FREE_AGENT_STATE: FreeAgentState = {
+  topic: null,
+  support: {},
+  candidateName: null,
+  eligibility: {},
+  unclearCount: 0
+};
+
+function readFreeAgentState(payload: Record<string, unknown> | null | undefined): FreeAgentState {
+  if (!payload) {
+    return EMPTY_FREE_AGENT_STATE;
+  }
+
+  return {
+    topic: (payload.topic as WhatsappTopic | undefined) ?? null,
+    support: (payload.support as KnownLeadFacts | undefined) ?? {},
+    candidateName: (payload.candidate_name as string | undefined) ?? null,
+    eligibility: (payload.eligibility as CandidacyFacts | undefined) ?? {},
+    unclearCount: Number(payload.eligibility_unclear_count) || 0
+  };
+}
+
+const SUPPORT_FIELD_LABELS: Record<keyof KnownLeadFacts, string> = {
+  interest: "Interesse",
+  region: "Localidade",
+  urgency: "Urgência",
+  budget: "Orçamento",
+  paymentMethod: "Forma de pagamento"
+};
+
+const ELIGIBILITY_FIELD_LABELS: Record<CandidacyKey, string> = {
+  age: "Tem 18 anos ou mais",
+  q1: "Experiência como cuidador(a)",
+  q2: "Autorização para trabalhar em Portugal",
+  q3: "Recibos verdes",
+  q4: "Vive em Lisboa ou Grande Lisboa"
+};
+
+/** Para mostrar nas páginas de Clientes/Inbox (ver MenuAnswer em menu-answers.ts). */
+function buildCollectedInfo(state: FreeAgentState): MenuAnswer[] {
+  const answers: MenuAnswer[] = [];
+
+  if (state.topic) {
+    answers.push({ question: "Assunto", answer: TOPIC_LABELS[state.topic] });
+  }
+
+  if (state.candidateName) {
+    answers.push({ question: "Nome", answer: state.candidateName });
+  }
+
+  for (const key of ["interest", "region", "urgency", "budget", "paymentMethod"] as const) {
+    const value = state.support[key];
+
+    if (value !== null && value !== undefined) {
+      answers.push({ question: SUPPORT_FIELD_LABELS[key], answer: String(value) });
+    }
+  }
+
+  for (const key of ELIGIBILITY_ORDER) {
+    const value = state.eligibility[key];
+
+    if (value === "yes" || value === "no") {
+      answers.push({ question: ELIGIBILITY_FIELD_LABELS[key], answer: value === "yes" ? "Sim" : "Não" });
+    }
+  }
+
+  return answers;
+}
+
+const MEDIA_NOT_SUPPORTED_REPLY = "De momento só consigo ler mensagens em texto — pode escrever por favor?";
+
+// Mesmo limite do bot de menu: 2 respostas não entendidas na mesma pergunta de elegibilidade
+// e o bot desiste e chama a equipa, em vez de insistir indefinidamente numa pergunta com
+// consequência legal (idade, autorização de trabalho).
+const CANDIDACY_UNCLEAR_LIMIT = 2;
+const CANDIDACY_UNCLEAR_HANDOFF_REPLY =
+  "Peço desculpa, não consegui perceber bem a sua resposta. Vou pedir a alguém da nossa equipa para continuar consigo, já responde por aqui.";
+
+/**
+ * Bot conversacional livre (UAZAPI_BOT_MODE=free). O modelo conduz a conversa à vontade, mas a
+ * elegibilidade da candidatura é SEMPRE decidida por decideCandidacyOutcome/os reconhecedores de
+ * texto — nunca pela interpretação livre do modelo (ver candidacy-eligibility.ts). Mesmo padrão
+ * de envio/registo de falha de runMenuBot, mas com uma única mensagem de texto por turno (sem
+ * listas: o modo livre não usa menus clicáveis).
+ */
+async function runFreeAgentBot({
+  supabase,
+  organizationId,
+  conversationId,
+  contactId,
+  contactName,
+  phone,
+  text,
+  isMedia = false,
+  instance,
+  restart = false
+}: {
+  supabase: SupabaseClient;
+  organizationId: string;
+  conversationId: string;
+  contactId: string;
+  contactName: string | null;
+  phone: string;
+  text: string;
+  isMedia?: boolean;
+  instance?: UazapiInstanceRef;
+  restart?: boolean;
+}) {
+  const { data: lastOutbound } = await supabase
+    .from("messages")
+    .select("payload")
+    .eq("organization_id", organizationId)
+    .eq("conversation_id", conversationId)
+    .eq("direction", "outbound")
+    .not("payload->>menu_step", "is", null)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle<{ payload: Record<string, unknown> | null }>();
+
+  const lastStep = lastOutbound?.payload?.menu_step as FreeAgentStep | undefined;
+  // Depois de uma recusa ou de um encaminhamento concluído, qualquer mensagem nova começa um
+  // atendimento do zero — não há "voltar ao menu" no modo livre, a conversa simplesmente reabre.
+  const effectiveRestart = restart || lastStep === "done" || lastStep === "declined";
+  const state = effectiveRestart ? EMPTY_FREE_AGENT_STATE : readFreeAgentState(lastOutbound?.payload);
+
+  let reply = "";
+  let nextTopic = state.topic;
+  let nextSupport = state.support;
+  let nextCandidateName = state.candidateName;
+  let nextEligibility = state.eligibility;
+  let nextUnclearCount = 0;
+  let nextStep: FreeAgentStep = !lastOutbound || effectiveRestart ? "menu" : "in_progress";
+  let declineReason: string | null = null;
+  let handoff = false;
+
+  if (isMedia) {
+    reply = MEDIA_NOT_SUPPORTED_REPLY;
+    nextUnclearCount = state.unclearCount;
+    nextStep = state.topic ? "in_progress" : "menu";
+  } else {
+    const gateOutcome = state.topic === "recruitment" ? decideCandidacyOutcome(state.eligibility) : null;
+    let eligibilityPendingField: CandidacyKey | null = null;
+    let eligibilityQuestion: string | null = null;
+    let skipLlm = false;
+
+    if (gateOutcome?.status === "pending") {
+      const recognized =
+        gateOutcome.nextField === "age"
+          ? recognizeAge(text, new Date().getFullYear()) ?? recognizeYesNo(text)
+          : recognizeYesNo(text);
+
+      if (recognized === null) {
+        nextUnclearCount = state.unclearCount + 1;
+
+        if (nextUnclearCount >= CANDIDACY_UNCLEAR_LIMIT + 1) {
+          reply = CANDIDACY_UNCLEAR_HANDOFF_REPLY;
+          handoff = true;
+          nextStep = "in_progress";
+          skipLlm = true;
+        } else {
+          eligibilityPendingField = gateOutcome.nextField;
+          eligibilityQuestion = gateOutcome.question;
+        }
+      } else {
+        nextEligibility = mergeCandidacyFacts({ [gateOutcome.nextField]: recognized }, state.eligibility);
+        const resolved = decideCandidacyOutcome(nextEligibility);
+
+        if (resolved.status === "declined") {
+          reply = resolved.message;
+          declineReason = declineReasonLabel(nextEligibility);
+          nextStep = "declined";
+          skipLlm = true;
+        } else if (resolved.status === "academy") {
+          reply = resolved.message;
+          nextTopic = "training";
+          nextStep = "in_progress";
+          skipLlm = true;
+        } else if (resolved.status === "pending") {
+          eligibilityPendingField = resolved.nextField;
+          eligibilityQuestion = resolved.question;
+        }
+        // "passed": segue para o modelo com eligibilityPendingField=null (perfil livre).
+      }
+    }
+
+    if (!skipLlm) {
+      const agent = await getUazapiLeadAgent(supabase, organizationId, instance);
+      // Mesma ordem decrescente + limit de recentMessages no caminho antigo: as 30 mais
+      // RECENTES, depois de volta à ordem cronológica, para a mensagem que acabou de
+      // chegar nunca ficar fora da janela numa conversa longa.
+      const { data: recentMessages } = await supabase
+        .from("messages")
+        .select("direction, content")
+        .eq("organization_id", organizationId)
+        .eq("conversation_id", conversationId)
+        .order("created_at", { ascending: false })
+        .limit(30)
+        .returns<Array<{ direction: "inbound" | "outbound"; content: string | null }>>();
+
+      const result = await runWhatsappAgent({
+        contact: { name: contactName, phone },
+        agent,
+        known: {
+          topic: state.topic,
+          support: state.support,
+          candidateName: state.candidateName,
+          eligibility: nextEligibility,
+          eligibilityPendingField,
+          eligibilityQuestion
+        },
+        messages: [...(recentMessages ?? [])].reverse(),
+        night: isNightTime()
+      });
+
+      reply = result.reply;
+      nextTopic = result.topic;
+      nextSupport = result.support;
+      nextCandidateName = result.candidateName;
+      handoff = result.handoffRequested;
+      nextStep = handoff ? "done" : "in_progress";
+
+      // O modelo só sabe perguntar a pergunta de elegibilidade pendente quando o prompt já a
+      // traz (eligibilityBlock, ativo só quando a conversa JÁ era "recruitment" neste turno).
+      // Na própria mensagem em que a pessoa entra na candidatura, o prompt ainda não sabia —
+      // o código garante a primeira pergunta aqui, para o portão nunca ser saltado.
+      if (result.topic === "recruitment" && state.topic !== "recruitment") {
+        const firstOutcome = decideCandidacyOutcome(nextEligibility);
+
+        if (firstOutcome.status === "pending") {
+          reply = `${reply}\n\n${firstOutcome.question}`;
+        }
+      }
+
+      // Candidatura aprovada e o modelo achou que já recolheu o suficiente: antes de
+      // encaminhar, entrega o link do formulário (mesmo link e momento de closing() no
+      // bot de menu) — isto o código garante, nunca fica a cargo do modelo inventar o link.
+      if (handoff && nextTopic === "recruitment" && decideCandidacyOutcome(nextEligibility).status === "passed") {
+        const formUrl = process.env.RECRUITMENT_FORM_URL || DEFAULT_RECRUITMENT_FORM_URL;
+        reply = `${reply}\n\n${formUrl}`;
+      }
+    }
+  }
+
+  const finalState: FreeAgentState = {
+    topic: nextTopic,
+    support: nextSupport,
+    candidateName: nextCandidateName,
+    eligibility: nextEligibility,
+    unclearCount: nextUnclearCount
+  };
+
+  const uazapiConfig = await getUazapiIntegrationConfig(supabase, organizationId, instance);
+  const integrationConfig = {
+    baseUrl: configString(uazapiConfig, ["baseUrl", "base_url"], process.env.UAZAPI_BASE_URL) ?? undefined,
+    token: configString(uazapiConfig, ["token", "apiKey", "api_key"], process.env.UAZAPI_TOKEN) ?? undefined
+  };
+
+  try {
+    const result = await sendUazapiMessage({ phone, text: reply, integrationConfig });
+
+    await supabase.from("messages").insert({
+      organization_id: organizationId,
+      conversation_id: conversationId,
+      contact_id: contactId,
+      direction: "outbound",
+      channel: "uazapi",
+      type: "text",
+      content: reply,
+      status: "sent",
+      payload: {
+        menu_step: nextStep,
+        topic: finalState.topic,
+        support: finalState.support,
+        candidate_name: finalState.candidateName,
+        eligibility: finalState.eligibility,
+        eligibility_unclear_count: finalState.unclearCount,
+        collected_info: buildCollectedInfo(finalState),
+        decline_reason: declineReason,
+        sent_as: "text",
+        result
+      }
+    });
+
+    await supabase
+      .from("conversations")
+      .update({
+        last_message_at: new Date().toISOString(),
+        ...(handoff ? { ai_enabled: false, current_stage: "human_handoff" } : {})
+      })
+      .eq("id", conversationId);
+
+    return { processed: true, ai: false, menu: nextStep, conversationId };
+  } catch (error) {
+    const sendError = error instanceof Error ? error.message : "Erro desconhecido.";
+
+    // Igual ao bot de menu: fica visível no Inbox como "não enviada", sem menu_step — o
+    // estado não avança para uma pergunta que a pessoa nunca recebeu.
+    await supabase.from("messages").insert({
+      organization_id: organizationId,
+      conversation_id: conversationId,
+      contact_id: contactId,
+      direction: "outbound",
+      channel: "uazapi",
+      type: "text",
+      content: reply,
+      status: "failed",
+      payload: { send_error: sendError.slice(0, 300) }
+    });
+
+    await supabase.from("webhook_logs").insert({
+      organization_id: organizationId,
+      provider: "uazapi",
+      event_type: "send_failed",
+      payload: { conversationId, error: sendError.slice(0, 300) },
+      status: "failed"
+    });
+
+    return { processed: true, ai: false, menu: "send_failed", conversationId };
+  }
+}
+
 async function getUazapiLeadAgent(
   supabase: SupabaseClient,
   organizationId: string,
@@ -495,7 +786,8 @@ async function findOrCreateUazapiConversation({
   phone,
   payload,
   senderName,
-  hauzappClienteId
+  hauzappClienteId,
+  checkHistoryWith
 }: {
   supabase: SupabaseClient;
   organizationId: string;
@@ -503,6 +795,8 @@ async function findOrCreateUazapiConversation({
   payload: unknown;
   senderName?: string | null;
   hauzappClienteId?: string | null;
+  /** Presente só na entrada automática: se a conversa for nova, confere histórico real no WhatsApp. */
+  checkHistoryWith?: UazapiInstanceRef;
 }) {
   const { data: existingLead } = await supabase
     .from("leads")
@@ -573,6 +867,13 @@ async function findOrCreateUazapiConversation({
   }
 
   if (!conversationId) {
+    // Conversa mesmo nova: se já havia histórico real no WhatsApp (a equipa pode já conhecer
+    // esta pessoa de antes deste sistema existir), o bot não assume — nasce pausada, como uma
+    // conversa que uma pessoa já estivesse a atender. Falha aberta: erro/demora = assume normal.
+    const priorHistory = checkHistoryWith
+      ? await hasRecentWhatsappHistory({ supabase, organizationId, instance: checkHistoryWith, phone })
+      : false;
+
     const { data: insertedConversation, error } = await supabase
       .from("conversations")
       .insert({
@@ -581,7 +882,7 @@ async function findOrCreateUazapiConversation({
         campaign_id: null,
         status: "open",
         current_stage: "hauzapp_prospection",
-        ai_enabled: true,
+        ai_enabled: !priorHistory,
         channel: "uazapi",
         hauzapp_cliente_id: hauzappClienteId ?? existingLead?.hauzapp_cliente_id ?? null,
         last_message_at: new Date().toISOString()
@@ -594,6 +895,16 @@ async function findOrCreateUazapiConversation({
     }
 
     conversationId = insertedConversation.id;
+
+    if (priorHistory) {
+      await supabase.from("webhook_logs").insert({
+        organization_id: organizationId,
+        provider: "uazapi",
+        event_type: "prior_history_detected",
+        payload: { conversationId },
+        status: "skipped_auto_engage"
+      });
+    }
   }
 
   const [{ data: contact }, { data: conversation }] = await Promise.all([

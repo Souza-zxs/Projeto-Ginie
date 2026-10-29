@@ -2,17 +2,26 @@
 // Cada mensagem do bot leva `menu_step` (a pergunta que ela faz); a mensagem seguinte do
 // cliente é a resposta a essa pergunta. Módulo puro (sem imports do projeto) para testes.
 
+export type MenuTopic = "support" | "training" | "recruitment" | "other";
+
+export type MenuAnswer = { question: string; answer: string };
+
 export type MenuHistoryMessage = {
   direction: "inbound" | "outbound";
   content: string | null;
   /** payload->>menu_step da mensagem; só o bot preenche. */
   menu_step: string | null;
   created_at?: string;
+  /**
+   * Os três campos abaixo só existem em mensagens do agente conversacional livre (nunca do
+   * menu antigo nem de mensagens manuais): ele já entrega a resposta pronta, em vez de o
+   * código ter de reconstruir "qual resposta respondeu qual pergunta" a partir de uma
+   * sequência fixa de passos — que deixa de existir no modo livre.
+   */
+  collected_info?: MenuAnswer[] | null;
+  topic?: MenuTopic | null;
+  decline_reason?: string | null;
 };
-
-export type MenuAnswer = { question: string; answer: string };
-
-export type MenuTopic = "support" | "training" | "recruitment" | "other";
 
 export const TOPIC_LABELS: Record<MenuTopic, string> = {
   support: "Apoio domiciliário",
@@ -284,13 +293,24 @@ function walkMenu(messages: MenuHistoryMessage[]): { answers: MenuAnswer[]; afte
   return { answers, afterHandoff };
 }
 
+/** Última mensagem do bot (com menu_step) no segmento — serve para saber se é do agente livre. */
+function lastBotMessage(messages: MenuHistoryMessage[]) {
+  return [...messages].reverse().find((message) => message.direction === "outbound" && message.menu_step) ?? null;
+}
+
 /** Respostas do cliente, em ordem, com a pergunta a que cada uma responde. */
 export function extractMenuAnswers(messages: MenuHistoryMessage[]): MenuAnswer[] {
-  return walkMenu(messages).answers;
+  return lastBotMessage(messages)?.collected_info ?? walkMenu(messages).answers;
 }
 
 /** Assunto escolhido: pelo caminho do menu; ao voltar ao menu principal, recomeça. */
 export function detectMenuTopic(messages: MenuHistoryMessage[]): MenuTopic | null {
+  const last = lastBotMessage(messages);
+
+  if (last?.topic) {
+    return last.topic;
+  }
+
   let topic: MenuTopic | null = null;
   let sawInbound = false;
 
@@ -356,10 +376,16 @@ function isNoText(text: string) {
   return /^(nao|n|no)(\s|,|$)/.test(text.normalize("NFKD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim());
 }
 
-/** Motivos da recusa, lidos das respostas "Não" às eliminatórias. */
-function declineReasonOf(progress: MenuProgress, answers: MenuAnswer[]) {
+/** Motivo da recusa: do agente livre (já pronto) ou, no menu antigo, lido das respostas "Não". */
+function declineReasonOf(progress: MenuProgress, answers: MenuAnswer[], messages: MenuHistoryMessage[]) {
   if (progress !== "declined") {
     return null;
+  }
+
+  const fromAgent = lastBotMessage(messages)?.decline_reason;
+
+  if (fromAgent) {
+    return fromAgent;
   }
 
   const reasons = answers.filter((item) => DECLINE_REASONS[item.question] && isNoText(item.answer)).map((item) => DECLINE_REASONS[item.question]);
@@ -413,13 +439,15 @@ export function splitMenuRequests(messages: MenuHistoryMessage[]): MenuRequest[]
     .map((segment) => {
       const progress = detectMenuProgress(segment);
       const walked = walkMenu(segment);
+      const answers = lastBotMessage(segment)?.collected_info ?? walked.answers;
 
       return {
         startedAt: segment.find((message) => message.created_at)?.created_at ?? null,
         topic: detectMenuTopic(segment),
         progress,
-        ...walked,
-        declineReason: declineReasonOf(progress, walked.answers)
+        answers,
+        afterHandoff: walked.afterHandoff,
+        declineReason: declineReasonOf(progress, answers, segment)
       };
     });
 }
