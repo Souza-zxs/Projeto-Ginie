@@ -18,6 +18,7 @@ import {
   yesNoAnswer as recognizeYesNo
 } from "@/agents/candidacy-answer-recognizers";
 import {
+  CANDIDACY_INTRO,
   ELIGIBILITY_ORDER,
   decideCandidacyOutcome,
   declineReasonLabel,
@@ -658,7 +659,7 @@ async function runFreeAgentBot({
         const firstOutcome = decideCandidacyOutcome(nextEligibility);
 
         if (firstOutcome.status === "pending") {
-          reply = `${reply}\n\n${firstOutcome.question}`;
+          reply = `${reply}\n\n${CANDIDACY_INTRO}\n\n${firstOutcome.question}`;
         }
       }
 

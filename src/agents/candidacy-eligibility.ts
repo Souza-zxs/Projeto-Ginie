@@ -22,6 +22,13 @@ export const REQUIREMENT_TEXT: Record<"q2" | "q3" | "q4", string> = {
   q4: "viver em Lisboa ou Grande Lisboa, ou poder deslocar-se até lá"
 };
 
+/** Aviso fixo, enviado uma única vez, assim que a conversa entra na candidatura — antes da
+ * primeira pergunta de elegibilidade (ver o ponto de transição em runFreeAgentBot, em
+ * lead-workflow.ts). Explica à pessoa o que vem a seguir, já que no bot livre não há mais
+ * botões a indicar isso. */
+export const CANDIDACY_INTRO =
+  "Antes de continuar, vou fazer algumas perguntas rápidas, uma de cada vez, para confirmar se a candidatura é possível — pode responder com as próprias palavras.";
+
 export const DECLINE_AGE =
   "Obrigada pelo interesse na DAR+. Para trabalhar connosco é necessário ter 18 anos ou mais, por isso, de momento, não podemos dar seguimento à candidatura. Se respondeu por engano, escreva 'voltar' para corrigir a resposta.";
 
