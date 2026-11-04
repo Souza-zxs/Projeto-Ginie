@@ -175,16 +175,19 @@ test("abertura do convite: resposta só com cumprimento ganha frase humana", () 
   assert.equal(leadInForOffer("Claro, com todo o gosto."), "Claro, com todo o gosto.");
 });
 
-test("primeira mensagem: apresenta-se como Cecília e diz que vai iniciar o atendimento", () => {
+test("primeira mensagem: apresenta-se como Cecília, identifica-se como IA e diz que vai iniciar o atendimento", () => {
   assert.equal(
     introduceAgent("Olá! Em que posso ajudar?", "Cecilia", "Boa tarde"),
-    "Boa tarde! Chamo-me Cecília, sou da DAR+ e vou iniciar o seu atendimento. Em que posso ajudar?"
+    "Boa tarde! Chamo-me Cecília, a assistente virtual (inteligência artificial) da DAR+, e vou iniciar o seu atendimento. Em que posso ajudar?"
   );
   assert.equal(introduceAgent("Chamo-me Cecília e posso ajudar.", "Cecilia", "Boa tarde"), "Chamo-me Cecília e posso ajudar.");
 });
 
 test("apresentação não é pulada só porque a resposta cita o nome", () => {
-  assert.match(introduceAgent("Boa tarde, Cecília. Estou com medo.", "Cecilia", "Boa tarde"), /Chamo-me Cecília, sou da DAR\+ e vou iniciar o seu atendimento/);
+  assert.match(
+    introduceAgent("Boa tarde, Cecília. Estou com medo.", "Cecilia", "Boa tarde"),
+    /Chamo-me Cecília, a assistente virtual \(inteligência artificial\) da DAR\+, e vou iniciar o seu atendimento/
+  );
 });
 
 test("cumprimento puro é respondido em código", () => {

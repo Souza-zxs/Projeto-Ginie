@@ -341,8 +341,9 @@ export function leadInForOffer(reply: string): string {
 }
 
 /**
- * Primeira mensagem da conversa: a agente apresenta-se pelo nome e diz que vai iniciar o
- * atendimento, como uma pessoa faria. O cumprimento do modelo (se houver) é substituído.
+ * Primeira mensagem da conversa: a agente apresenta-se pelo nome, identifica-se como IA
+ * (decisão do Thur: sempre, a todo cliente novo, não só se perguntarem) e diz que vai
+ * iniciar o atendimento. O cumprimento do modelo (se houver) é substituído.
  */
 export function introduceAgent(reply: string, agentName: string | null | undefined, greeting: string): string {
   const raw = (agentName || "Cecília").trim();
@@ -358,7 +359,7 @@ export function introduceAgent(reply: string, agentName: string | null | undefin
 
   const body = reply.replace(LEADING_GREETING, "").trim();
 
-  return `${greeting}! Chamo-me ${display}, sou da DAR+ e vou iniciar o seu atendimento. ${body}`.trim();
+  return `${greeting}! Chamo-me ${display}, a assistente virtual (inteligência artificial) da DAR+, e vou iniciar o seu atendimento. ${body}`.trim();
 }
 
 /** Guarda-corpo completo para uma resposta de modelo, com o histórico da conversa. */

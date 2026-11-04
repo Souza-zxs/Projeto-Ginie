@@ -42,7 +42,6 @@ type WhatsappAgentAgentConfig = {
   forbidden_phrases?: string | null;
   conversation_examples?: string | null;
   agent_skills?: string | null;
-  appointment_enabled?: boolean | null;
 };
 
 type WhatsappAgentInput = {
@@ -60,8 +59,6 @@ export type WhatsappAgentOutput = {
   candidateName: string | null;
   /** O modelo acha que já recolheu o suficiente e a equipa deve continuar a partir daqui. */
   handoffRequested: boolean;
-  /** A pessoa concordou em receber uma visita de avaliação em casa (só apoio domiciliário). */
-  wantsAppointment: boolean;
 };
 
 const SERVICE_CATALOGUE = [
@@ -111,14 +108,14 @@ function buildSystemPrompt(input: WhatsappAgentInput) {
     input.agent?.conversation_examples ? `Bons exemplos:\n${input.agent.conversation_examples}` : "",
     input.agent?.agent_skills ? `Conhecimento do agente:\n${input.agent.agent_skills}` : "",
     "- Nunca confirmes desconto ou preço fechado; isso é sempre com a equipa.",
-    input.agent?.appointment_enabled ? "- Nunca proponhas data ou hora com as tuas próprias palavras: os horários são sempre o sistema que oferece, a partir da disponibilidade real. Se, numa conversa de apoio domiciliário, a pessoa concordar em receber uma visita de avaliação em casa, marca wantsAppointment como verdadeiro e termina a resposta sem inventar nenhum horário — o sistema envia as opções a seguir." : "- Não marques nem ofereças horários, datas ou visitas: marcar é sempre com a nossa equipa. Se a pessoa quiser marcar uma visita ou combinar um horário, diz com simpatia que a equipa trata disso e combina diretamente com ela, e não proponhas nenhuma data nem hora.",
+    "- Não marques nem ofereças horários, datas ou visitas: marcar é sempre com a nossa equipa, porque só ela vê a disponibilidade real. Se a pessoa quiser marcar uma visita ou combinar um horário, diz com simpatia que a equipa trata disso e combina diretamente com ela, e não proponhas nenhuma data nem hora.",
     "",
     "O campo `now` traz a data e a hora de Portugal, e `periodo` diz se estamos dentro ou fora do horário de atendimento. Segue `periodo`: já está calculado, não refaças a conta.",
     "",
     "Responde SÓ com um objeto JSON válido, sem texto antes ou depois e sem blocos de código.",
     "Campos obrigatórios: reply, topic (um de: support | training | recruitment | other),",
     "interest, region, budget, paymentMethod, urgency (factos do apoio domiciliário; null se não se aplicar ou ainda não foi dito),",
-    "candidateName (nome que a pessoa deu, se for candidatura; null senão), handoffRequested (bool), wantsAppointment (bool).",
+    "candidateName (nome que a pessoa deu, se for candidatura; null senão), handoffRequested (bool).",
     "",
     "Lembrete final: o campo reply é em português de Portugal (nunca \"você\"), em frases naturais de quem conversa, sem repetir o que já foi dito."
   ]
@@ -129,7 +126,7 @@ function buildSystemPrompt(input: WhatsappAgentInput) {
 const OUTPUT_SCHEMA = {
   type: "object",
   additionalProperties: false,
-  required: ["reply", "topic", "interest", "region", "budget", "paymentMethod", "urgency", "candidateName", "handoffRequested", "wantsAppointment"],
+  required: ["reply", "topic", "interest", "region", "budget", "paymentMethod", "urgency", "candidateName", "handoffRequested"],
   properties: {
     reply: { type: "string" },
     topic: { type: "string", enum: ["support", "training", "recruitment", "other"] },
@@ -139,8 +136,7 @@ const OUTPUT_SCHEMA = {
     paymentMethod: { type: ["string", "null"] },
     urgency: { type: ["string", "null"] },
     candidateName: { type: ["string", "null"] },
-    handoffRequested: { type: "boolean" },
-    wantsAppointment: { type: "boolean" }
+    handoffRequested: { type: "boolean" }
   }
 } as const;
 
@@ -154,7 +150,6 @@ type RawOutput = {
   urgency: string | null;
   candidateName: string | null;
   handoffRequested: boolean;
-  wantsAppointment: boolean;
 };
 
 export async function runWhatsappAgent(input: WhatsappAgentInput): Promise<WhatsappAgentOutput> {
@@ -178,7 +173,6 @@ export async function runWhatsappAgent(input: WhatsappAgentInput): Promise<Whats
       support: input.known.support,
       candidateName: input.known.candidateName,
       handoffRequested: false,
-      wantsAppointment: false
     };
   }
 
@@ -193,7 +187,6 @@ export async function runWhatsappAgent(input: WhatsappAgentInput): Promise<Whats
       support: input.known.support,
       candidateName: input.known.candidateName,
       handoffRequested: true,
-      wantsAppointment: false
     };
   }
 
@@ -205,7 +198,6 @@ export async function runWhatsappAgent(input: WhatsappAgentInput): Promise<Whats
       support: input.known.support,
       candidateName: input.known.candidateName,
       handoffRequested: false,
-      wantsAppointment: false
     };
   }
 
@@ -224,7 +216,6 @@ export async function runWhatsappAgent(input: WhatsappAgentInput): Promise<Whats
       support: input.known.support,
       candidateName: input.known.candidateName,
       handoffRequested: false,
-      wantsAppointment: false
     };
   }
 
@@ -237,7 +228,6 @@ export async function runWhatsappAgent(input: WhatsappAgentInput): Promise<Whats
       support: input.known.support,
       candidateName: input.known.candidateName,
       handoffRequested: true,
-      wantsAppointment: false
     };
   }
 
@@ -318,7 +308,6 @@ function heuristicReply(input: WhatsappAgentInput): WhatsappAgentOutput {
     support: input.known.support,
     candidateName: input.known.candidateName,
     handoffRequested: true,
-    wantsAppointment: false
   };
 }
 
@@ -383,6 +372,5 @@ function normalize(value: Partial<RawOutput>, input: WhatsappAgentInput): Whatsa
     support,
     candidateName,
     handoffRequested: Boolean(value.handoffRequested),
-    wantsAppointment: Boolean(value.wantsAppointment)
   };
 }
