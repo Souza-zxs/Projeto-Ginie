@@ -75,6 +75,14 @@ test("parentesco: a pessoa falou nos dois ou em plural -> passa", () => {
   assert.equal(enforceReplyGuardrails("Para o avô?", "para o meu avo").reason, null);
 });
 
+// Regressão: "confirmação" contém "irma" como substring. Sem o limite de palavra completa
+// (checagem de fronteira Unicode), isso contava como a pessoa ter mencionado "irmã" e
+// bloqueava uma resposta válida sobre "irmão".
+test("parentesco: palavra que só contém o parentesco por acaso (ex.: 'confirmação' tem 'irma' dentro) não conta", () => {
+  const r = enforceReplyGuardrails("Preciso falar com o seu irmão sobre isto.", "Aguardo a confirmação da visita.");
+  assert.equal(r.reason, null);
+});
+
 test("cumprimento repetido é removido quando já houve um", () => {
   assert.equal(stripRepeatedGreeting("Boa tarde, João. Em que zona vive?", ["Boa tarde! Como posso ajudar?"]), "Em que zona vive?");
   assert.equal(stripRepeatedGreeting("Boa tarde. Obrigado pela informação.", ["Olá"]), "Obrigado pela informação.");

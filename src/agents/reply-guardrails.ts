@@ -36,8 +36,8 @@ const FORBIDDEN_PATTERNS: Array<{ pattern: RegExp; reason: string }> = [
 // pessoa diz "avó" e a resposta sai com "avó e avô". `reply*` = o que a resposta não pode
 // inventar; `user*` = o que conta como a pessoa já ter mencionado (plurais e grafias sem
 // acento cobrem os dois géneros, porque não dá para distinguir).
-const L = "(?<![\p{L}])";
-const R = "(?![\p{L}])";
+const L = "(?<![\\p{L}])";
+const R = "(?![\\p{L}])";
 const re = (alts: string) => new RegExp(`${L}(?:${alts})${R}`, "iu");
 
 const KINSHIP_PAIRS: Array<{ replyF: RegExp; replyM: RegExp; userF: RegExp; userM: RegExp }> = [
