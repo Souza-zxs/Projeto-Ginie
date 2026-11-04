@@ -4,7 +4,7 @@ import { AGENT_LANGUAGE_RULE } from "@/agents/locale";
 import { mergeKnownFacts, type KnownLeadFacts } from "@/agents/known-facts";
 import { buildGroundingText, isGroundedNumber, isGroundedText } from "@/agents/extraction-grounding";
 import { computeDeterministicScore, isDeterministicallyQualified } from "@/agents/qualification-score";
-import { enforceReplyGuardrails } from "@/agents/reply-guardrails";
+import { applyConversationGuardrails, enforceReplyGuardrails } from "@/agents/reply-guardrails";
 import { chatCompletion, hasLlmConfigured, resolveModel, type ChatMessage } from "@/lib/openai/chat";
 
 export type LeadQualification = {
@@ -193,7 +193,7 @@ export async function runLeadAgent(input: LeadAgentInput): Promise<LeadQualifica
     }
 
     const qualification = normalizeQualification(JSON.parse(extractJson(result.content)), input);
-    const { reply } = enforceReplyGuardrails(qualification.reply);
+    const { reply } = applyConversationGuardrails(qualification.reply, input.messages);
 
     return { ...qualification, reply };
   } catch {

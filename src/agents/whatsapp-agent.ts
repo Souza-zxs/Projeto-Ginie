@@ -13,7 +13,7 @@ import { describeServicePeriod } from "@/lib/service-hours";
 import { AGENT_LANGUAGE_RULE } from "@/agents/locale";
 import { mergeKnownFacts, type KnownLeadFacts } from "@/agents/known-facts";
 import { buildGroundingText, isGroundedNumber, isGroundedText } from "@/agents/extraction-grounding";
-import { enforceReplyGuardrails } from "@/agents/reply-guardrails";
+import { applyConversationGuardrails, enforceReplyGuardrails } from "@/agents/reply-guardrails";
 import { chatCompletion, hasLlmConfigured, resolveModel, type ChatMessage } from "@/lib/openai/chat";
 import type { CandidacyFacts, CandidacyKey } from "@/agents/candidacy-eligibility";
 
@@ -244,7 +244,10 @@ function normalize(value: Partial<RawOutput>, input: WhatsappAgentInput): Whatsa
   const validTopics: WhatsappTopic[] = ["support", "training", "recruitment", "other"];
   const topic = value.topic && validTopics.includes(value.topic) ? value.topic : (input.known.topic ?? "other");
 
-  const { reply } = enforceReplyGuardrails(typeof value.reply === "string" && value.reply.trim() ? value.reply : fallback.reply);
+  const { reply } = applyConversationGuardrails(
+    typeof value.reply === "string" && value.reply.trim() ? value.reply : fallback.reply,
+    input.messages
+  );
 
   return {
     reply,

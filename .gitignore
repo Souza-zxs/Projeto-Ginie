@@ -12,3 +12,5 @@ coverage
 n8n-mcp-main/*
 !n8n-mcp-main/pointer-campanhas-workflows/
 !n8n-mcp-main/pointer-campanhas-workflows/**
+.env.backup-2026-09-21
+.env.backup*
