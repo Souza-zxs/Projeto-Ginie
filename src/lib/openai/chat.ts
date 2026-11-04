@@ -55,6 +55,14 @@ export function resolveModel(agentModel?: string | null) {
   return agentModel || process.env.OPENAI_MODEL || "gpt-4.1-mini";
 }
 
+/** Amostragem conservadora para o modelo local. Ajustável por LLM_TEMPERATURE (0 a 1). */
+function getLocalSamplingParams() {
+  const configured = Number(process.env.LLM_TEMPERATURE);
+  const temperature = Number.isFinite(configured) && configured >= 0 && configured <= 1 ? configured : 0.3;
+
+  return { temperature, top_p: 0.9 };
+}
+
 type ChatCompletionParams = {
   model: string;
   messages: ChatMessage[];
@@ -71,7 +79,7 @@ type ChatCompletionResult = {
 export async function chatCompletion(
   params: ChatCompletionParams
 ): Promise<ChatCompletionResult> {
-  const { baseUrl, apiKey } = getOpenAIConfig();
+  const { baseUrl, apiKey, isLocal } = getOpenAIConfig();
   const timeoutMs = getTimeoutMs();
 
   let response: Response;
@@ -87,7 +95,11 @@ export async function chatCompletion(
       body: JSON.stringify({
         model: params.model,
         messages: params.messages,
-        ...(params.responseFormat ? { response_format: params.responseFormat } : {})
+        ...(params.responseFormat ? { response_format: params.responseFormat } : {}),
+        // Modelo local pequeno (3B) erra muito com a temperatura padrão do Ollama (1.0):
+        // mistura género, inventa familiares, escorrega para o português do Brasil.
+        // Mais baixo = mais fiel ao prompt. Só no modo local: alguns modelos da OpenAI recusam o parâmetro.
+        ...(isLocal ? getLocalSamplingParams() : {})
       }),
       signal: AbortSignal.timeout(timeoutMs)
     });

@@ -166,6 +166,31 @@ export function formatSlotOptions(slots: OfferedSlot[]) {
   ].join("\n");
 }
 
+/**
+ * Igual a formatSlotOptions, mas avisa quando a primeira opção já não é de hoje (hora de
+ * Lisboa): a pessoa que pediu "hoje" percebe porquê, em vez de achar que o bot errou.
+ */
+export function formatSlotOptionsFor(slots: OfferedSlot[], now: Date = new Date()) {
+  if (slots.length === 0) {
+    return formatSlotOptions(slots);
+  }
+
+  const day = (value: Date | string) => new Intl.DateTimeFormat("en-CA", { timeZone: VISIT_TIMEZONE }).format(new Date(value));
+  const sameDay = day(slots[0].startsAt) === day(now);
+  const lines = slots.map((slot, index) => `${index + 1}) ${formatVisitDateTime(slot.startsAt)}`);
+  const numbers = slots.map((_, index) => index + 1).join(", ");
+  const header = sameDay
+    ? "Consigo fazer a visita de avaliação em sua casa num destes horários:"
+    : "Para hoje já não tenho horários livres (a nossa agenda segue a hora de Lisboa), mas consigo fazer a visita de avaliação em sua casa num destes:";
+
+  return [
+    header,
+    ...lines,
+    "",
+    `Qual lhe convém mais? Pode responder só com o número (${numbers}) ou dizer-me outro dia e hora de que goste mais.`
+  ].join("\n");
+}
+
 export function formatVisitConfirmation(slot: OfferedSlot) {
   return `Combinado! A sua visita ficou marcada para ${formatVisitDateTime(slot.startsAt)}. Se precisar de remarcar, é só avisar.`;
 }

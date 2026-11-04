@@ -9,6 +9,8 @@ import {
 } from "@/services/integrations/config";
 import { isNightTime } from "@/lib/service-hours";
 import { shouldResumeBot } from "@/services/uazapi/bot-resume";
+import { composeHandoffReply, requiresHuman } from "@/services/uazapi/human-handoff";
+import { TEAM_CONFIRM_REPLY, leadInForOffer } from "@/agents/reply-guardrails";
 import { hasRecentWhatsappHistory } from "@/services/uazapi/new-contact-check";
 import { DEFAULT_RECRUITMENT_FORM_URL, decideMenuReply, readMenuStep, withTapHint } from "@/services/uazapi/menu-bot";
 import { TOPIC_LABELS, type MenuAnswer } from "@/services/uazapi/menu-answers";
@@ -35,7 +37,7 @@ import {
   getOpenProposal,
   proposeVisitSlots
 } from "@/services/calendar/appointments";
-import { formatSlotOptions, formatVisitConfirmation, parseSlotChoice, type Availability, type OfferedSlot } from "@/services/calendar/slots";
+import { formatSlotOptionsFor, formatSlotOptions, formatVisitConfirmation, parseSlotChoice, type Availability, type OfferedSlot } from "@/services/calendar/slots";
 
 type AgentConfig = {
   id: string;
@@ -682,7 +684,17 @@ async function runFreeAgentBot({
       nextTopic = result.topic;
       nextSupport = result.support;
       nextCandidateName = result.candidateName;
-      handoff = result.handoffRequested;
+      // Fora da candidatura (que usa o encaminhamento para entregar o formulário), a decisão de
+      // chamar uma pessoa é do código: só quando ela é pedida ou o assunto só um humano resolve.
+      handoff =
+        nextTopic === "recruitment" || state.topic === "recruitment"
+          ? result.handoffRequested
+          : requiresHuman(text) || result.reply === TEAM_CONFIRM_REPLY;
+
+      if (handoff && nextTopic !== "recruitment") {
+        reply = composeHandoffReply(text, reply);
+      }
+
       nextStep = handoff ? "done" : "in_progress";
 
       // O modelo só sabe perguntar a pergunta de elegibilidade pendente quando o prompt já a
@@ -715,7 +727,7 @@ async function runFreeAgentBot({
           }).slice(0, 3);
 
           if (windows.length > 0) {
-            reply = `${reply}\n\n${formatSlotOptions(windows)}`;
+            reply = `${leadInForOffer(reply)}\n\n${formatSlotOptionsFor(windows)}`;
             // Não encaminha ainda: só quando a pessoa escolher o horário (igual ao apoio
             // domiciliário) — por isso desfaz o handoff/"done" que o modelo tinha pedido.
             handoff = false;
@@ -752,7 +764,7 @@ async function runFreeAgentBot({
         }).slice(0, 3);
 
         if (windows.length > 0) {
-          reply = `${reply}\n\n${formatSlotOptions(windows)}`;
+          reply = `${leadInForOffer(reply)}\n\n${formatSlotOptionsFor(windows)}`;
 
           await proposeVisitSlots({
             supabase,

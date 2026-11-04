@@ -9,11 +9,11 @@
 // decide passa/recusa é sempre o código, em candidacy-eligibility.ts + lead-workflow.ts — ver
 // o comentário em cima de buildSystemPrompt.
 import { formatNowForAgent } from "@/lib/datetime";
-import { describeServicePeriod } from "@/lib/service-hours";
+import { describeServicePeriod, getGreeting } from "@/lib/service-hours";
 import { AGENT_LANGUAGE_RULE } from "@/agents/locale";
 import { mergeKnownFacts, type KnownLeadFacts } from "@/agents/known-facts";
 import { buildGroundingText, isGroundedNumber, isGroundedText } from "@/agents/extraction-grounding";
-import { applyConversationGuardrails, enforceReplyGuardrails } from "@/agents/reply-guardrails";
+import { applyConversationGuardrails, dropKnownRegionQuestion, enforceReplyGuardrails, followUpFor, needsFollowUp, isEmergency, EMERGENCY_REPLY, isBotQuestion, BOT_REPLY, detectRegion, isPriceQuestion, isFreeClarification, PRICE_REPLY, FREE_CLARIFICATION_REPLY, HOURS_QUESTION, followUpQuestion, TEAM_OFFER, TEAM_OFFER_MARKER, TEAM_CONFIRM_REPLY, isAffirmative, shouldOfferTeam, stripQuestions, greetingReply, historyTextForModel, introduceAgent, isGreetingOnly } from "@/agents/reply-guardrails";
 import { chatCompletion, hasLlmConfigured, resolveModel, type ChatMessage } from "@/lib/openai/chat";
 import type { CandidacyFacts, CandidacyKey } from "@/agents/candidacy-eligibility";
 
@@ -42,6 +42,7 @@ type WhatsappAgentAgentConfig = {
   forbidden_phrases?: string | null;
   conversation_examples?: string | null;
   agent_skills?: string | null;
+  appointment_enabled?: boolean | null;
 };
 
 type WhatsappAgentInput = {
@@ -64,15 +65,9 @@ export type WhatsappAgentOutput = {
 };
 
 const SERVICE_CATALOGUE = [
-  "A DAR+ tem três áreas: apoio domiciliário (cuidar de uma pessoa idosa em casa), formação",
-  "profissional em geriatria, e candidaturas (trabalhar na DAR+ como cuidador(a)).",
-  "",
-  "Cursos de formação disponíveis:",
-  "- Técnico de Geriatria 360º com Estágio Prático: b-learning, 60h online + 120h de estágio.",
-  "- Animação Sociocultural com Idosos com Estágio Prático: b-learning, 40h online + 20h de prática.",
-  "- Gestão de ERPI, Centro de Dia e SAD: e-learning síncrono, 60h de aulas ao vivo + 15h de projeto final.",
-  "- Prevenção do Burnout no Cuidador de Idosos: e-learning assíncrono, 4h.",
-  "Alguns cursos também têm módulos avulsos. Não menciones preços: isso fica para a equipa."
+  "A DAR+ tem três áreas: apoio domiciliário (cuidar de uma pessoa idosa em casa), formação profissional em geriatria e candidaturas (trabalhar na DAR+ como cuidador(a)).",
+  "Cursos: Técnico de Geriatria 360º (b-learning, 60h online + 120h de estágio); Animação Sociocultural com Idosos (b-learning, 40h online + 20h de prática); Gestão de ERPI, Centro de Dia e SAD (e-learning síncrono, 60h ao vivo + 15h de projeto); Prevenção do Burnout no Cuidador de Idosos (e-learning, 4h). Alguns têm módulos avulsos.",
+  "Ao falar dos cursos, apresenta-os em frases naturais, sem listas nem marcadores, e só dá os detalhes de um curso se a pessoa perguntar por ele. Não menciones preços: isso fica para a equipa."
 ].join("\n");
 
 function buildSystemPrompt(input: WhatsappAgentInput) {
@@ -96,8 +91,13 @@ function buildSystemPrompt(input: WhatsappAgentInput) {
     AGENT_LANGUAGE_RULE,
     "",
     "Regras de ritmo:",
-    input.agent?.greeting_template ? `Saudação preferida: ${input.agent.greeting_template}` : "",
     "- Uma pergunta por mensagem; não acumules perguntas.",
+    "- Escreve como uma pessoa a conversar no WhatsApp: reage ao que a pessoa disse (\"Percebo\", \"Claro\", \"Imagino que seja uma preocupação\"), com frases naturais e calorosas. Nunca escrevas como um comunicado (\"Deixo a informação que…\") nem como um menu ou formulário.",
+    "- Vai direto ao que a pessoa pediu, com simpatia. Só expressas preocupação ou pena quando ela falar de um problema, doença ou urgência; num pedido normal, não presumas emoções (nunca digas \"está preocupada\") e não marques o género da pessoa.",
+    "- Se a pessoa já disse o que precisa, não perguntes \"como posso ajudar\": reconhece o pedido e faz UMA pergunta útil para avançar (zona onde vive, para quem é, que ajuda precisa, horário).",
+    "- Distingue quem escreve de quem precisa de cuidados: fala da pessoa de quem se cuida em terceira pessoa (\"a sua avó\", \"ela\") e nunca lhe atribuas horários ou tarefas como se fossem de quem escreve, nem inventes horários novos.",
+    "- Nunca uses listas com marcadores nem enumerações com hífenes: escreve sempre em frases corridas, como numa conversa.",
+    "- Nunca escrevas listas de horários, datas ou números de opção: os horários de visita são sempre enviados pelo sistema, depois da tua resposta.",
     "- Sem pontuação exagerada nem excesso de emojis.",
     "- O campo `known` no JSON do utilizador traz o que já sabemos desta pessoa. NUNCA voltes a perguntar o que já está preenchido lá.",
     "- Se a última mensagem for só uma saudação ou cortesia (\"olá\", \"boa tarde\", \"tudo bem\"), responde com simpatia e retoma a conversa de onde ficou — não repitas a pergunta do zero nem a trates como se não tivesses percebido.",
@@ -111,7 +111,7 @@ function buildSystemPrompt(input: WhatsappAgentInput) {
     input.agent?.conversation_examples ? `Bons exemplos:\n${input.agent.conversation_examples}` : "",
     input.agent?.agent_skills ? `Conhecimento do agente:\n${input.agent.agent_skills}` : "",
     "- Nunca confirmes desconto ou preço fechado; isso é sempre com a equipa.",
-    "- Nunca proponhas data ou hora com as tuas próprias palavras: os horários são sempre o sistema que oferece, a partir da disponibilidade real. Se, numa conversa de apoio domiciliário, a pessoa concordar em receber uma visita de avaliação em casa, marca wantsAppointment como verdadeiro e termina a resposta sem inventar nenhum horário — o sistema envia as opções a seguir.",
+    input.agent?.appointment_enabled ? "- Nunca proponhas data ou hora com as tuas próprias palavras: os horários são sempre o sistema que oferece, a partir da disponibilidade real. Se, numa conversa de apoio domiciliário, a pessoa concordar em receber uma visita de avaliação em casa, marca wantsAppointment como verdadeiro e termina a resposta sem inventar nenhum horário — o sistema envia as opções a seguir." : "- Não marques nem ofereças horários, datas ou visitas: marcar é sempre com a nossa equipa. Se a pessoa quiser marcar uma visita ou combinar um horário, diz com simpatia que a equipa trata disso e combina diretamente com ela, e não proponhas nenhuma data nem hora.",
     "",
     "O campo `now` traz a data e a hora de Portugal, e `periodo` diz se estamos dentro ou fora do horário de atendimento. Segue `periodo`: já está calculado, não refaças a conta.",
     "",
@@ -120,7 +120,7 @@ function buildSystemPrompt(input: WhatsappAgentInput) {
     "interest, region, budget, paymentMethod, urgency (factos do apoio domiciliário; null se não se aplicar ou ainda não foi dito),",
     "candidateName (nome que a pessoa deu, se for candidatura; null senão), handoffRequested (bool), wantsAppointment (bool).",
     "",
-    `Lembrete final sobre o campo reply: ${AGENT_LANGUAGE_RULE}`
+    "Lembrete final: o campo reply é em português de Portugal (nunca \"você\"), em frases naturais de quem conversa, sem repetir o que já foi dito."
   ]
     .filter(Boolean)
     .join("\n");
@@ -162,25 +162,117 @@ export async function runWhatsappAgent(input: WhatsappAgentInput): Promise<Whats
     return heuristicReply(input);
   }
 
+  // Um "Olá" não precisa do modelo: responder em código é instantâneo e evita que o modelo
+  // pequeno invente a conversa (já o vimos escrever como se fosse o cliente).
+  const lastInbound = [...input.messages].reverse().find((m) => m.direction === "inbound")?.content ?? "";
+
+  if (lastInbound && isGreetingOnly(lastInbound)) {
+    return {
+      reply: greetingReply(
+        lastInbound,
+        input.messages.some((m) => m.direction === "outbound"),
+        input.agent?.name,
+        getGreeting()
+      ),
+      topic: input.known.topic ?? "other",
+      support: input.known.support,
+      candidateName: input.known.candidateName,
+      handoffRequested: false,
+      wantsAppointment: false
+    };
+  }
+
+  // A pessoa aceitou que a equipa entre em contacto: confirma e passa à equipa (o lead-workflow
+  // faz a passagem ao ver esta resposta).
+  const lastOutboundText = [...input.messages].reverse().find((m) => m.direction === "outbound")?.content ?? "";
+
+  if (lastInbound && lastOutboundText.includes(TEAM_OFFER_MARKER) && isAffirmative(lastInbound)) {
+    return {
+      reply: TEAM_CONFIRM_REPLY,
+      topic: input.known.topic ?? "support",
+      support: input.known.support,
+      candidateName: input.known.candidateName,
+      handoffRequested: true,
+      wantsAppointment: false
+    };
+  }
+
+  // "És um robô?": sempre a verdade, sempre a mesma resposta.
+  if (lastInbound && isBotQuestion(lastInbound)) {
+    return {
+      reply: BOT_REPLY,
+      topic: input.known.topic ?? "other",
+      support: input.known.support,
+      candidateName: input.known.candidateName,
+      handoffRequested: false,
+      wantsAppointment: false
+    };
+  }
+
+  // Preço: resposta fixa e correta (o orçamento é que é gratuito), seguida da pergunta que falta.
+  if (lastInbound && (isPriceQuestion(lastInbound) || isFreeClarification(lastInbound))) {
+    const known = input.known.support;
+    const next = shouldOfferTeam(input.messages, known.region)
+      ? TEAM_OFFER
+      : known.region && known.urgency
+        ? HOURS_QUESTION
+        : followUpQuestion({ region: known.region, urgency: known.urgency });
+
+    return {
+      reply: `${isFreeClarification(lastInbound) ? FREE_CLARIFICATION_REPLY : PRICE_REPLY}\n\n${next}`,
+      topic: input.known.topic ?? "support",
+      support: input.known.support,
+      candidateName: input.known.candidateName,
+      handoffRequested: false,
+      wantsAppointment: false
+    };
+  }
+
+  // Urgência (queda, desmaio, falta de ar…): resposta fixa com o 112 e passagem à equipa. Não
+  // pode depender de um modelo pequeno, que já inventou uma "equipa médica".
+  if (lastInbound && isEmergency(lastInbound)) {
+    return {
+      reply: EMERGENCY_REPLY,
+      topic: input.known.topic ?? "support",
+      support: input.known.support,
+      candidateName: input.known.candidateName,
+      handoffRequested: true,
+      wantsAppointment: false
+    };
+  }
+
   try {
     const systemPrompt = buildSystemPrompt(input);
+    // A conversa vai como turnos reais de chat (pessoa = user, Cecília = assistant): um modelo
+    // pequeno segue muito melhor o fio da conversa assim do que lendo-a dentro de um JSON.
+    // O contexto interno (o que já sabemos, data, período) vem no fim, para o início do prompt
+    // ficar igual entre mensagens e o Ollama poder reaproveitar o cache.
+    const turns: ChatMessage[] = input.messages
+      .slice(-8)
+      .map((m) => ({
+        role: m.direction === "inbound" ? ("user" as const) : ("assistant" as const),
+        content: m.direction === "inbound" ? (m.content ?? "") : historyTextForModel(m.content)
+      }))
+      .filter((m) => m.content.trim().length > 0);
+
+    const knownFacts = Object.entries(input.known.support)
+      .filter(([, value]) => value !== null && value !== undefined && value !== "")
+      .map(([key, value]) => `${key}: ${value}`);
+
+    const context = [
+      "CONTEXTO INTERNO (não o repitas à pessoa):",
+      `- Nome da pessoa: ${input.contact.name ?? input.known.candidateName ?? "ainda não o sabes"}`,
+      `- Assunto até agora: ${input.known.topic ?? "ainda não definido"}`,
+      `- Já sabes: ${knownFacts.length > 0 ? knownFacts.join("; ") : "nada ainda"}`,
+      `- Data e hora: ${formatNowForAgent()}`,
+      `- ${describeServicePeriod()}`,
+      "Responde à ÚLTIMA mensagem da pessoa, tendo em conta toda a conversa acima: não repitas a saudação nem perguntes o que ela já disse."
+    ].join("\n");
+
     const messages: ChatMessage[] = [
       { role: "system", content: systemPrompt },
-      {
-        role: "user",
-        content: JSON.stringify({
-          contact: input.contact,
-          known: {
-            topic: input.known.topic,
-            support: input.known.support,
-            candidateName: input.known.candidateName,
-            eligibilityPendingField: input.known.eligibilityPendingField
-          },
-          messages: input.messages,
-          now: formatNowForAgent(),
-          periodo: describeServicePeriod()
-        })
-      }
+      ...turns,
+      { role: "system", content: context }
     ];
 
     const result = await chatCompletion({
@@ -197,7 +289,10 @@ export async function runWhatsappAgent(input: WhatsappAgentInput): Promise<Whats
 
     return normalize(value, input);
   } catch {
-    return heuristicReply(input);
+    // Falha do modelo (tempo esgotado, JSON inválido): pede para repetir em vez de encaminhar
+    // e pausar o bot. Só se encaminha para a equipa quando a pessoa pede ou há algo que só uma
+    // pessoa resolve (ver human-handoff.ts).
+    return { ...heuristicReply(input), reply: TECH_RETRY_REPLY, handoffRequested: false };
   }
 }
 
@@ -210,6 +305,8 @@ function extractJson(raw: string): string {
 
   return start !== -1 && end !== -1 ? candidate.slice(start, end + 1) : candidate;
 }
+
+const TECH_RETRY_REPLY = "Peço desculpa, tive uma pequena dificuldade técnica. Pode repetir a sua mensagem, por favor?";
 
 const FALLBACK_REPLY = "Peço desculpa, estou com uma dificuldade técnica neste momento. Vou já passar a sua mensagem à nossa equipa.";
 
@@ -241,7 +338,12 @@ function normalize(value: Partial<RawOutput>, input: WhatsappAgentInput): Whatsa
     urgency: isGroundedText(value.urgency, groundingText, input.known.support.urgency) ? (value.urgency ?? null) : null,
     budget: isGroundedNumber(value.budget, groundingText, input.known.support.budget) ? (value.budget ?? null) : null
   };
-  const support = mergeKnownFacts(grounded, input.known.support, fallback.support);
+  const mergedSupport = mergeKnownFacts(grounded, input.known.support, fallback.support);
+  // A zona quase nunca vem preenchida pelo modelo pequeno: lê-a das mensagens da pessoa.
+  const regionFromText = mergedSupport.region
+    ? null
+    : detectRegion(input.messages.filter((m) => m.direction === "inbound").map((m) => m.content ?? "").join("\n"));
+  const support = regionFromText ? { ...mergedSupport, region: regionFromText } : mergedSupport;
 
   const candidateName = isGroundedText(value.candidateName, groundingText, input.known.candidateName)
     ? (value.candidateName ?? null)
@@ -254,9 +356,29 @@ function normalize(value: Partial<RawOutput>, input: WhatsappAgentInput): Whatsa
     typeof value.reply === "string" && value.reply.trim() ? value.reply : fallback.reply,
     input.messages
   );
+  const hasOutbound = input.messages.some((m) => m.direction === "outbound");
+  let body = dropKnownRegionQuestion(reply, support.region);
+
+  // Conversa de apoio que acaba sem pergunta fica parada: acrescenta a pergunta que falta.
+  const lastInboundText = [...input.messages].reverse().find((m) => m.direction === "inbound")?.content ?? "";
+
+  // Com zona e necessidade já recolhidas, fecha oferecendo a equipa (única pergunta da mensagem).
+  if ((topic === "support" || topic === "other") && !value.handoffRequested && shouldOfferTeam(input.messages, support.region)) {
+    body = `${stripQuestions(body) || "Perfeito, ficou anotado."}\n\n${TEAM_OFFER}`.trim();
+  }
+
+  if (
+    (topic === "support" || topic === "other" || topic === "training") &&
+    !value.handoffRequested &&
+    needsFollowUp(body, lastInboundText)
+  ) {
+    body = `${body}\n\n${followUpFor(topic, { region: support.region, urgency: support.urgency })}`;
+  }
+
+  const finalReply = hasOutbound ? body : introduceAgent(body, input.agent?.name, getGreeting());
 
   return {
-    reply,
+    reply: finalReply,
     topic,
     support,
     candidateName,

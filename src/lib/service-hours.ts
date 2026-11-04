@@ -64,11 +64,11 @@ export function getGreeting(date: Date = new Date(), timeZone: string = SERVICE_
 
 const PERIOD_INSTRUCTION: Record<ServicePeriod, string> = {
   business:
-    "DENTRO do horário de atendimento (2ª a 6ª, 08h00-16h30). Atenda normalmente.",
+    "Estado atual: DENTRO do horário de atendimento (2ª a 6ª, 08h00-16h30). Conversa normalmente.",
   evening:
-    "FORA do horário da equipa (terminou às 16h30), mas antes das 20h00. Continue a atender e a recolher os dados, e diga que a equipa dá seguimento no dia útil seguinte.",
+    "Estado atual: FORA do horário da equipa (terminou às 16h30), mas o atendimento continua até às 20h00. Isto é informação interna: NÃO a repitas à pessoa nem escrevas frases sobre recolher dados ou sobre contacto amanhã. Só se a pessoa perguntar quando fala com a equipa é que dizes que é no próximo dia útil.",
   closed:
-    "FORA do horário de atendimento (entre 20h00 e 08h00, ou fim de semana). Se ainda não enviou a mensagem de fora de horário nesta conversa hoje, envie-a. Pode recolher dados, mas não prometa contacto hoje."
+    "Estado atual: FORA do horário de atendimento (20h00-08h00 ou fim de semana). Isto é informação interna: NÃO a repitas. Se for a primeira resposta desta conversa, avisa numa só frase que a equipa só responde no próximo dia útil; depois disso, não voltes a falar disso a menos que a pessoa pergunte."
 };
 
 /** Texto único para o agente: período, instrução e cumprimento, já calculados. */

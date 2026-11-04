@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   formatSlotOptions,
+  formatSlotOptionsFor,
   formatVisitConfirmation,
   formatVisitDateTime,
   parseSlotChoice
@@ -106,4 +107,14 @@ test("com uma única opção, 'sim' confirma; com várias, é ambíguo", () => {
 
 test("sem opções oferecidas não escolhe nada", () => {
   assert.equal(choose("1", []), null);
+});
+
+test("convite à visita: soa a pessoa e avisa quando já não há horários de hoje", () => {
+  const slots = [{ startsAt: "2026-11-05T09:00:00.000Z", endsAt: "2026-11-05T10:00:00.000Z" }];
+  const sameDay = formatSlotOptionsFor(slots, new Date("2026-11-05T07:00:00.000Z"));
+  assert.match(sameDay, /Consigo fazer a visita de avaliação/);
+  assert.match(sameDay, /1\)/);
+
+  const nextDay = formatSlotOptionsFor(slots, new Date("2026-11-04T17:57:00.000Z"));
+  assert.match(nextDay, /Para hoje já não tenho horários livres/);
 });
