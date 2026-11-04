@@ -59,6 +59,8 @@ export type WhatsappAgentOutput = {
   candidateName: string | null;
   /** O modelo acha que já recolheu o suficiente e a equipa deve continuar a partir daqui. */
   handoffRequested: boolean;
+  /** A pessoa concordou em receber uma visita de avaliação em casa (só apoio domiciliário). */
+  wantsAppointment: boolean;
 };
 
 const SERVICE_CATALOGUE = [
@@ -108,14 +110,15 @@ function buildSystemPrompt(input: WhatsappAgentInput) {
     input.agent?.forbidden_phrases ? `Frases proibidas:\n${input.agent.forbidden_phrases}` : "",
     input.agent?.conversation_examples ? `Bons exemplos:\n${input.agent.conversation_examples}` : "",
     input.agent?.agent_skills ? `Conhecimento do agente:\n${input.agent.agent_skills}` : "",
-    "- Nunca confirmes visitas, descontos ou preços fechados; isso é sempre com a equipa.",
+    "- Nunca confirmes desconto ou preço fechado; isso é sempre com a equipa.",
+    "- Nunca proponhas data ou hora com as tuas próprias palavras: os horários são sempre o sistema que oferece, a partir da disponibilidade real. Se, numa conversa de apoio domiciliário, a pessoa concordar em receber uma visita de avaliação em casa, marca wantsAppointment como verdadeiro e termina a resposta sem inventar nenhum horário — o sistema envia as opções a seguir.",
     "",
     "O campo `now` traz a data e a hora de Portugal, e `periodo` diz se estamos dentro ou fora do horário de atendimento. Segue `periodo`: já está calculado, não refaças a conta.",
     "",
     "Responde SÓ com um objeto JSON válido, sem texto antes ou depois e sem blocos de código.",
     "Campos obrigatórios: reply, topic (um de: support | training | recruitment | other),",
     "interest, region, budget, paymentMethod, urgency (factos do apoio domiciliário; null se não se aplicar ou ainda não foi dito),",
-    "candidateName (nome que a pessoa deu, se for candidatura; null senão), handoffRequested (bool).",
+    "candidateName (nome que a pessoa deu, se for candidatura; null senão), handoffRequested (bool), wantsAppointment (bool).",
     "",
     `Lembrete final sobre o campo reply: ${AGENT_LANGUAGE_RULE}`
   ]
@@ -126,7 +129,7 @@ function buildSystemPrompt(input: WhatsappAgentInput) {
 const OUTPUT_SCHEMA = {
   type: "object",
   additionalProperties: false,
-  required: ["reply", "topic", "interest", "region", "budget", "paymentMethod", "urgency", "candidateName", "handoffRequested"],
+  required: ["reply", "topic", "interest", "region", "budget", "paymentMethod", "urgency", "candidateName", "handoffRequested", "wantsAppointment"],
   properties: {
     reply: { type: "string" },
     topic: { type: "string", enum: ["support", "training", "recruitment", "other"] },
@@ -136,7 +139,8 @@ const OUTPUT_SCHEMA = {
     paymentMethod: { type: ["string", "null"] },
     urgency: { type: ["string", "null"] },
     candidateName: { type: ["string", "null"] },
-    handoffRequested: { type: "boolean" }
+    handoffRequested: { type: "boolean" },
+    wantsAppointment: { type: "boolean" }
   }
 } as const;
 
@@ -150,6 +154,7 @@ type RawOutput = {
   urgency: string | null;
   candidateName: string | null;
   handoffRequested: boolean;
+  wantsAppointment: boolean;
 };
 
 export async function runWhatsappAgent(input: WhatsappAgentInput): Promise<WhatsappAgentOutput> {
@@ -215,7 +220,8 @@ function heuristicReply(input: WhatsappAgentInput): WhatsappAgentOutput {
     topic: input.known.topic ?? "other",
     support: input.known.support,
     candidateName: input.known.candidateName,
-    handoffRequested: true
+    handoffRequested: true,
+    wantsAppointment: false
   };
 }
 
@@ -254,6 +260,7 @@ function normalize(value: Partial<RawOutput>, input: WhatsappAgentInput): Whatsa
     topic,
     support,
     candidateName,
-    handoffRequested: Boolean(value.handoffRequested)
+    handoffRequested: Boolean(value.handoffRequested),
+    wantsAppointment: Boolean(value.wantsAppointment)
   };
 }

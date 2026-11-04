@@ -28,6 +28,14 @@ import {
 } from "@/agents/candidacy-eligibility";
 import { runWhatsappAgent, type WhatsappTopic } from "@/agents/whatsapp-agent";
 import type { KnownLeadFacts } from "@/agents/known-facts";
+import {
+  confirmProposedVisit,
+  getAvailableWindows,
+  getBusySlots,
+  getOpenProposal,
+  proposeVisitSlots
+} from "@/services/calendar/appointments";
+import { formatSlotOptions, formatVisitConfirmation, parseSlotChoice, type Availability, type OfferedSlot } from "@/services/calendar/slots";
 
 type AgentConfig = {
   id: string;
@@ -42,6 +50,9 @@ type AgentConfig = {
   agent_skills: string | null;
   qualification_criteria: string | null;
   handoff_instructions: string | null;
+  /** Visita de avaliação em casa (só apoio domiciliário, por decisão do Thur). */
+  appointment_enabled: boolean | null;
+  weekly_availability: Availability | null;
 };
 
 type LeadMessageInput = {
@@ -565,7 +576,30 @@ async function runFreeAgentBot({
   let declineReason: string | null = null;
   let handoff = false;
 
-  if (isMedia) {
+  // Se a pessoa está a responder a uma oferta de horário (ver proposeVisitSlots, mais abaixo),
+  // confirma direto pelo código — sem chamar o modelo, que poderia contradizer o horário.
+  const proposal = isMedia ? null : await getOpenProposal(supabase, conversationId);
+  let chosenSlot: OfferedSlot | null = null;
+  let confirmedVisit: Awaited<ReturnType<typeof confirmProposedVisit>> = null;
+
+  if (proposal) {
+    const chosenSlotIndex = parseSlotChoice(text, proposal.slots);
+
+    if (chosenSlotIndex !== null) {
+      chosenSlot = proposal.slots[chosenSlotIndex];
+      confirmedVisit = await confirmProposedVisit({
+        supabase,
+        organizationId,
+        proposalId: proposal.id,
+        slot: chosenSlot
+      });
+    }
+  }
+
+  if (confirmedVisit && chosenSlot) {
+    reply = formatVisitConfirmation(chosenSlot);
+    nextStep = "in_progress";
+  } else if (isMedia) {
     reply = MEDIA_NOT_SUPPORTED_REPLY;
     nextUnclearCount = state.unclearCount;
     nextStep = state.topic ? "in_progress" : "menu";
@@ -667,8 +701,69 @@ async function runFreeAgentBot({
       // encaminhar, entrega o link do formulário (mesmo link e momento de closing() no
       // bot de menu) — isto o código garante, nunca fica a cargo do modelo inventar o link.
       if (handoff && nextTopic === "recruitment" && decideCandidacyOutcome(nextEligibility).status === "passed") {
-        const formUrl = process.env.RECRUITMENT_FORM_URL || DEFAULT_RECRUITMENT_FORM_URL;
-        reply = `${reply}\n\n${formUrl}`;
+        // Decisão do Thur: a chamada agendada substitui o link do formulário, não as duas
+        // coisas juntas. Só cai de volta no link se a agenda não estiver configurada/disponível
+        // — nunca deixa a candidatura aprovada sem próximo passo nenhum.
+        let scheduledCall = false;
+
+        if (!proposal && agent?.appointment_enabled) {
+          const busy = await getBusySlots(supabase, organizationId);
+          const windows = getAvailableWindows({
+            durationMinutes: 30,
+            availability: agent.weekly_availability ?? {},
+            busy
+          }).slice(0, 3);
+
+          if (windows.length > 0) {
+            reply = `${reply}\n\n${formatSlotOptions(windows)}`;
+            // Não encaminha ainda: só quando a pessoa escolher o horário (igual ao apoio
+            // domiciliário) — por isso desfaz o handoff/"done" que o modelo tinha pedido.
+            handoff = false;
+            nextStep = "in_progress";
+            scheduledCall = true;
+
+            await proposeVisitSlots({
+              supabase,
+              organizationId,
+              conversationId,
+              contactId,
+              agentId: agent.id,
+              title: `Chamada com a equipa - ${contactName ?? phone}`,
+              slots: windows
+            });
+          }
+        }
+
+        if (!scheduledCall) {
+          const formUrl = process.env.RECRUITMENT_FORM_URL || DEFAULT_RECRUITMENT_FORM_URL;
+          reply = `${reply}\n\n${formUrl}`;
+        }
+      }
+
+      // A pessoa concordou em receber uma visita de avaliação em casa (só apoio domiciliário,
+      // por decisão do Thur — candidatura ainda não tem agenda ligada). Oferece horários reais;
+      // a visita só é marcada quando ela escolher um (ver confirmedReply, no início da função).
+      if (!proposal && result.wantsAppointment && nextTopic === "support" && agent?.appointment_enabled) {
+        const busy = await getBusySlots(supabase, organizationId);
+        const windows = getAvailableWindows({
+          durationMinutes: 60,
+          availability: agent.weekly_availability ?? {},
+          busy
+        }).slice(0, 3);
+
+        if (windows.length > 0) {
+          reply = `${reply}\n\n${formatSlotOptions(windows)}`;
+
+          await proposeVisitSlots({
+            supabase,
+            organizationId,
+            conversationId,
+            contactId,
+            agentId: agent.id,
+            title: `Visita de avaliação - ${contactName ?? phone}`,
+            slots: windows
+          });
+        }
       }
     }
   }
@@ -764,7 +859,7 @@ async function getUazapiLeadAgent(
 
   let query = supabase
     .from("ai_agents")
-    .select("id, name, description, openai_model, system_prompt, greeting_template, humanization_rules, forbidden_phrases, conversation_examples, agent_skills, qualification_criteria, handoff_instructions")
+    .select("id, name, description, openai_model, system_prompt, greeting_template, humanization_rules, forbidden_phrases, conversation_examples, agent_skills, qualification_criteria, handoff_instructions, appointment_enabled, weekly_availability")
     .eq("organization_id", organizationId)
     .eq("agent_type", "lead_meta")
     .eq("active", true);
